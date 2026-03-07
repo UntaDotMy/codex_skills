@@ -1,0 +1,18 @@
+# Local workspace settings
+.claude/settings.local.json
+
+# Editor folders
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temp and log files
+*.log
+*.tmp
+*.bak
+*.swp
+*.orig
+*.rej

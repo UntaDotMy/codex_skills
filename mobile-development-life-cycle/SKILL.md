@@ -333,6 +333,14 @@ When running commands on Windows:
 - Git Bash available but not assumed
 - See `../software-development-life-cycle/references/36-execution-environment-windows.md` for details
 
+## Sub-Agent Lifecycle Rules
+
+- If spawned sub-agents are required, wait for them to reach a terminal state before finalizing; if `wait` times out, extend the timeout, continue non-overlapping work, and wait again unless the user explicitly cancels or redirects.
+- Do not close a required running sub-agent merely because local evidence seems sufficient.
+- Keep at most one live same-role agent by default within the same project or workstream, maintain a lightweight spawned-agent list keyed by role or workstream, and check that list before `spawn_agent` so you can reuse an active or prior same-role agent via `send_input` or `resume_agent` instead of spawning a duplicate.
+- Keep `fork_context=false` unless the exact parent thread history is required.
+- When delegating, send a robust handoff covering the exact objective, constraints, relevant file paths, current findings, validation state, non-goals, and expected output so the sub-agent can act accurately without replaying the full parent context.
+
 ## Best Practices
 
 1. **Test on Real Devices**: Simulators don't catch everything

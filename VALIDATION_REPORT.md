@@ -64,7 +64,7 @@ The live repository is structurally sound for Codex CLI. The first remediation p
 ## Gaps Found In This Audit
 
 ### Corrected
-- `AGENTS.md` used non-Codex names: `replace`, `grep_search`, `ask_user`, and `generalist`
+- `AGENTS.md` used legacy non-Codex runtime names that were removed during remediation
 - `README.md` described the repo too broadly while omitting the four Codex-only specialist skills
 - `claude/README.md` did not clearly explain that the Claude tree is only a subset of the root Codex inventory
 - The previous `VALIDATION_REPORT.md` still described the obsolete `7`-skill Codex snapshot
@@ -79,6 +79,8 @@ The live repository is structurally sound for Codex CLI. The first remediation p
 - Root Windows usage docs now prefer Git Bash directly or `js_repl` + `codex.tool("exec_command", ...)` instead of PowerShell-wrapped examples
 - Root Codex `SKILL.md` files now mirror the `js_repl` + `codex.tool(...)` runtime rule carried by their paired agent prompts
 - Codex agent validation now requires same-role sub-agent reuse guidance plus `fork_context` default-off wording
+- Root Codex `SKILL.md` files now mirror required sub-agent completion, no-early-close, spawned-agent tracking, and robust delegation-packet guidance
+- Codex guidance validation now uses a safer legacy-runtime matcher, and root skill validation now checks sub-agent lifecycle policy in both docs and prompts
 
 ## Validation Commands
 

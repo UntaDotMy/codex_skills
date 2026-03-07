@@ -130,8 +130,28 @@ validate_codex_skill_dir() {
         return 1
     fi
 
+    if ! grep -q "wait for them to reach a terminal state before finalizing" "$skill_dir/SKILL.md"; then
+        print_error "Codex SKILL.md must require waiting for required sub-agents: $skill_name"
+        return 1
+    fi
+
+    if ! grep -q "Do not close a required running sub-agent merely because local evidence seems sufficient" "$skill_dir/SKILL.md"; then
+        print_error "Codex SKILL.md must forbid closing a running required sub-agent early: $skill_name"
+        return 1
+    fi
+
+    if ! grep -qi "keep at most one live same-role agent by default" "$skill_dir/SKILL.md" || ! grep -q "fork_context" "$skill_dir/SKILL.md"; then
+        print_error "Codex SKILL.md must require same-role agent reuse and fork_context default-off: $skill_name"
+        return 1
+    fi
+
+    if ! grep -q "maintain a lightweight spawned-agent list" "$skill_dir/SKILL.md" || ! grep -q "send a robust handoff covering the exact objective" "$skill_dir/SKILL.md"; then
+        print_error "Codex SKILL.md must require spawned-agent tracking and robust delegation packets: $skill_name"
+        return 1
+    fi
+
     # Codex skills must reference Codex-native tools and agent profiles only.
-    local invalid_codex_runtime_regex='\`(ask_user|replace|grep_search|read_file|write_file|run_terminal|run_terminal_cmd|generalist)\`'
+    local invalid_codex_runtime_regex='[`](ask_user|replace|grep_search|read_file|write_file|run_terminal|run_terminal_cmd|generalist)[`]'
     if grep -nE "$invalid_codex_runtime_regex" "$skill_dir/SKILL.md" > /dev/null 2>&1; then
         print_error "Non-Codex tool or agent-profile names found in Codex skill: $skill_name"
         grep -nE "$invalid_codex_runtime_regex" "$skill_dir/SKILL.md" | head -n 20
@@ -205,6 +225,11 @@ validate_codex_agent_config() {
         return 1
     fi
 
+    if ! grep -q "maintain a lightweight spawned-agent list" "$config_file" || ! grep -q "send a robust handoff covering the exact objective" "$config_file"; then
+        print_error "Codex agent prompt must require spawned-agent tracking and robust delegation packets: $skill_name"
+        return 1
+    fi
+
     return 0
 }
 
@@ -217,7 +242,7 @@ validate_codex_guidance_file() {
         return 1
     fi
 
-    local invalid_codex_runtime_regex='\`(ask_user|replace|grep_search|read_file|write_file|run_terminal|run_terminal_cmd|generalist)\`'
+    local invalid_codex_runtime_regex='[`](ask_user|replace|grep_search|read_file|write_file|run_terminal|run_terminal_cmd|generalist)[`]'
     if grep -nE "$invalid_codex_runtime_regex" "$file" > /dev/null 2>&1; then
         print_error "Non-Codex tool or agent-profile names found in Codex guidance: $file"
         grep -nE "$invalid_codex_runtime_regex" "$file" | head -n 20
@@ -252,6 +277,16 @@ validate_codex_guidance_file() {
 
         if ! grep -qi "Layered Memory" "$file"; then
             print_error "Missing layered-memory policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "maintain a lightweight per-project spawned-agent list" "$file"; then
+            print_error "Missing spawned-agent registry policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "robust handoff packet" "$file"; then
+            print_error "Missing robust sub-agent handoff policy in AGENTS.md"
             return 1
         fi
     fi
