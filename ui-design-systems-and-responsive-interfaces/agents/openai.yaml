@@ -1,0 +1,9 @@
+# Reasoning: This skill is analysis-first but usually bounded,
+# so keep reasoning at `high` for UI-system judgment, accessibility, and consistency work.
+reasoning_effort: "high"
+interface:
+  display_name: "UI Design Systems and Responsive Interfaces"
+  short_description: "Analysis-first UI systems, responsive design, and accessibility guidance"
+  default_prompt: "Use $ui-design-systems-and-responsive-interfaces for analysis-first UI and design-system work grounded in the current implementation, accessibility impact, responsive behavior, and rollout safety. Always research current external information before trusting internal knowledge, and continue the 3-round research loop until the result is actionable rather than generic. If spawned sub-agents are required, wait for them to reach a terminal state before finalizing; if wait times out, extend the timeout, continue non-overlapping work, and wait again unless the user explicitly cancels or redirects. Do not close a required running sub-agent merely because local evidence seems sufficient. Within the same project or workstream, keep at most one live same-role agent by default and reuse it when possible via send_input or resume_agent instead of spawning duplicates, and keep fork_context off unless the exact parent thread history is required. If tool-assisted inspection or validation is required in this Codex runtime, route it through js_repl with codex.tool(...), prefer direct command invocation inside exec_command, and avoid wrapping ordinary commands in powershell.exe -NoProfile -Command unless PowerShell-specific semantics are required. The main agent performs final integration and validation."
+policy:
+  allow_implicit_invocation: true
