@@ -1,6 +1,6 @@
-# Codex & Claude Skills Repository
+# Codex Skills Repository
 
-This repository contains Codex-first skills in the root tree plus a smaller Claude mirror under `claude/`, with platform-specific configurations for each environment.
+This repository is a Codex-first skill pack for OpenAI Codex CLI. It ships specialist skills, repo-wide orchestration guidance, sync tooling for `~/.codex`, and a memory-status workflow that turns saved artifacts into human-style learning reports.
 
 ## Directory Structure
 
@@ -10,6 +10,8 @@ codex_skills/
 ├── 00-skill-routing-and-escalation.md
 ├── README.md
 ├── VALIDATION_REPORT.md
+├── docs/
+│   └── context-efficiency-playbook.md
 ├── reviewer/
 ├── software-development-life-cycle/
 ├── web-development-life-cycle/
@@ -21,268 +23,196 @@ codex_skills/
 ├── ui-design-systems-and-responsive-interfaces/
 ├── ux-research-and-experience-strategy/
 ├── git-expert/
-├── claude/
+├── memory-status-reporter/
 └── sync-skills.sh
 ```
 
-## Skills Overview
+Located in root directories (12 skill directories total).
 
-### Codex CLI Skills (11 Total)
+### Codex CLI Skills (12 Total)
 
-1. **reviewer** - Code review, quality gates, production readiness
-2. **software-development-life-cycle** - Architecture, SDLC, testing
-3. **web-development-life-cycle** - Web performance, SEO, browser compatibility
-4. **mobile-development-life-cycle** - iOS/Android, app store submission
-5. **backend-and-data-architecture** - APIs, microservices, data models, messaging
-6. **cloud-and-devops-expert** - Infrastructure as Code, CI/CD, deployment automation
-7. **qa-and-automation-engineer** - Test automation, TDD, E2E frameworks
-8. **security-and-compliance-auditor** - Threat modeling, vulnerability hunting, compliance
-9. **ui-design-systems-and-responsive-interfaces** - Design systems, accessibility
-10. **ux-research-and-experience-strategy** - UX research, user testing
-11. **git-expert** - Git workflows, conflict resolution
+1. **reviewer** - Production readiness, quality gates, DRY enforcement
+2. **software-development-life-cycle** - Architecture, planning, delivery, validation
+3. **web-development-life-cycle** - Web implementation, browser/runtime quality
+4. **mobile-development-life-cycle** - Mobile lifecycle, release, offline, platform behavior
+5. **backend-and-data-architecture** - APIs, contracts, data flow, service integration
+6. **cloud-and-devops-expert** - Infrastructure, CI/CD, release reliability, observability
+7. **qa-and-automation-engineer** - Test strategy, regression coverage, automation
+8. **security-and-compliance-auditor** - Threat modeling, secrets, remediation, compliance
+9. **ui-design-systems-and-responsive-interfaces** - Design systems, accessibility, visual execution
+10. **ux-research-and-experience-strategy** - UX framing, jobs-to-be-done, usability strategy
+11. **git-expert** - Repository-state safety, branching, recovery, review handoff
+12. **memory-status-reporter** - Daily learnings, mistake ledgers, tool-mistake tracking, and heuristic memory-health reporting
 
-### Claude Mirror Skills (8 Total)
+## Setup
 
-- Shared mirrors: `reviewer`, `software-development-life-cycle`, `web-development-life-cycle`, `mobile-development-life-cycle`, `ui-design-systems-and-responsive-interfaces`, `ux-research-and-experience-strategy`, `git-expert`
-- Claude-only: `claude-api`
-- Codex-only today: `backend-and-data-architecture`, `cloud-and-devops-expert`, `qa-and-automation-engineer`, `security-and-compliance-auditor`
+### Requirements
 
-## Platform Separation
+- Codex CLI with `js_repl`, `memories`, and `multi_agent` enabled
+- Python 3 for memory-report tooling and sync helpers
+- Git Bash on Windows if you want to run `sync-skills.sh` directly
 
-### Codex CLI Runtime
-- Located in root directories (11 skill directories total)
-- Uses `AGENTS.md` for orchestration
-- Supports multi-agent features (explorer, worker, reviewer, architect)
-- Skills sync to `~/.codex/skills/` or `C:\Users\<user>\.codex\skills\` (plus `AGENTS.md` + routing doc into `~/.codex/`)
+### Install the Skill Pack
 
-### Claude Code Skills
-- Located in `claude/` directory
-- **No orchestration file needed** - Claude Code auto-discovers skills
-- Each skill is a directory with `SKILL.md` (YAML frontmatter + markdown)
-- Syncs to `~/.claude/skills/` or `C:\Users\<user>\.claude\skills\`
-- Supports optional files: `template.md`, `examples/`, `scripts/`
-- Mirrors 7 shared skills plus the Claude-only `claude-api` skill
-
-## Claude Code Skill Structure
-
-Claude Code follows the Agent Skills open standard. Each skill needs:
-
-```
-skill-name/
-├── SKILL.md           # Required: YAML frontmatter + instructions
-├── template.md        # Optional: template for Claude to fill
-├── examples/          # Optional: example outputs
-│   └── sample.md
-├── scripts/           # Optional: utility scripts
-│   └── helper.py
-└── references/        # Optional: reference documentation
-    └── guide.md
-```
-
-**Minimal structure:**
-```
-skill-name/
-└── SKILL.md
-```
-
-**SKILL.md format:**
-```yaml
----
-name: skill-name
-description: What this skill does and when to use it
----
-
-Your skill instructions here...
-```
-
-## Sync Script Usage
-
-### Sync Both Platforms
-```bash
-./sync-skills.sh
-# or
-./sync-skills.sh all
-```
-
-### Sync Codex Only
-```bash
-./sync-skills.sh codex
-```
-
-### Sync Claude Only
-```bash
-./sync-skills.sh claude
-```
-
-### Validate Without Syncing
 ```bash
 ./sync-skills.sh validate
-```
-
-### Check Status
-```bash
+./sync-skills.sh codex
 ./sync-skills.sh status
 ```
 
-## Validation
+The sync does all of the following:
 
-The sync script validates:
-- ✅ YAML frontmatter present
-- ✅ Required fields (name, description)
-- ✅ No shortform variable names in code
-- ✅ File structure integrity
-- ✅ Codex guidance avoids non-Codex tool and agent-profile names
+- copies root skills into `~/.codex/skills/`
+- copies `AGENTS.md` and `00-skill-routing-and-escalation.md` into `~/.codex/`
+- refreshes `~/.codex/agents/*.toml` from each root `agents/openai.yaml`
+- keeps `~/.codex/config.toml` wired for `memory-status-reporter`
+- injects shared execution-policy lines for working briefs, context efficiency, modular structure, surgical patches, and compact learning snapshots
 
-## Key Features
+### macOS and Linux
 
-### Iterative Development Loops
+Codex home: `~/.codex`
 
-All skills enforce iterative loops until production-ready:
+### Windows
 
-1. **Research Loop** - Understand technology and approach
-2. **Planning Loop** - Document implementation strategy
-3. **Implementation Loop** - Write clean, focused code
-4. **Testing Loop** - Verify functionality
-5. **Fix Loop** - Fix all issues (linting, types, tests, bugs)
-6. **Verification Loop** - Confirm solution works
-7. **Review Loop** - Self-review before presenting
+The sync script detects Windows shells and maps Codex home to `%USERPROFILE%\\.codex`. In Git Bash this usually appears as `/c/Users/<user>/.codex`.
 
-**Loop continues until:**
-- ✅ All tests passing
-- ✅ No linting/type errors
-- ✅ No bugs found
-- ✅ Code review passes
-- ✅ All requirements met
-
-### Code Quality Standards
-
-**Readability (Non-Negotiable):**
-- ❌ NO shortform names: `usr`, `btn`, `tmp`, `data`, `res`, `req`
-- ✅ MUST use full names: `user`, `button`, `temporaryValue`, `userData`, `response`
-
-**Scope Discipline (Non-Negotiable):**
-- ❌ NO unrequested features
-- ❌ NO unnecessary refactoring
-- ❌ NO backward compatibility (unless requested)
-- ✅ ONLY implement what was requested
-
-**Quality Gates:**
-- All linting errors fixed (not disabled)
-- All type errors fixed (not suppressed)
-- All tests passing (not skipped)
-- No security vulnerabilities
-- No duplicate code
-
-## Installation
-
-### For Codex CLI
-
-1. Clone or download this repository
-2. Run sync script:
-   ```bash
-   cd /path/to/codex_skills
-   ./sync-skills.sh codex
-   ```
-3. Skills will be synced to `~/.codex/skills/` (plus `AGENTS.md` + routing doc into `~/.codex/`)
-
-### For Claude Code
-
-1. Create Claude-specific skills in `claude/` directory
-2. Run sync script:
-   ```bash
-   ./sync-skills.sh claude
-   ```
-3. Skills will be synced to `~/.claude/skills/`
-
-## Windows Usage
-
-On Windows, prefer Git Bash for the sync script:
-
-```bash
-cd /d/Nasri/Project/codex_skills
-./sync-skills.sh validate
-./sync-skills.sh all
-```
-
-Inside this Codex runtime, route validation through `js_repl` + `codex.tool("exec_command", ...)` and select Git Bash explicitly instead of wrapping the script in PowerShell:
+Inside Codex runtime, route shell work through `js_repl` and `codex.tool("exec_command", ...)`:
 
 ```javascript
 await codex.tool("exec_command", {
   shell: "C:\\Program Files\\Git\\bin\\bash.exe",
   cmd: "./sync-skills.sh validate",
-  workdir: "D:\\Nasri\\Project\\codex_skills"
+  workdir: "D:\\path\\to\\codex_skills"
 })
+```
+
+## Context Efficiency Playbook
+
+This repo now treats context efficiency like a product requirement.
+
+### Default Retrieval Ladder
+
+1. **Working brief first** — restate the user story, outcome, constraints, acceptance criteria, and validation plan
+2. **Exact retrieval first** — use file, symbol, or keyword search before broad reads
+3. **Targeted reads second** — inspect only the relevant snippets, callers, callees, and direct dependencies
+4. **Full reads only for edit scope** — fully read only files you will edit or that directly drive the change
+5. **Surgical patching** — change only the impacted ranges instead of rewriting whole files
+6. **Final re-read** — re-read the working brief plus touched files before validating or answering
+
+### Token-Saving Techniques
+
+- keep stable prompt prefixes so caches can hit more often
+- move volatile evidence to the end of prompts
+- summarize long histories into reusable notes instead of replaying raw logs
+- use compact memory snapshots instead of pasting entire memory files
+- avoid regenerating unchanged code when a diff or narrow patch is enough
+- prefer modular files so future reads stay narrow and traceable
+
+### Research Summary
+
+The detailed research-backed version lives in `docs/context-efficiency-playbook.md`. The practical conclusions are:
+
+- use retrieval-augmented generation for large bodies of reference text or project memory
+- combine exact search with semantic retrieval when the corpus is broad
+- compress or summarize before sending long context to the model
+- reuse cached prefixes and small focused models for narrow classification or filtering work
+- separate working memory, episodic memory, and durable memory so you do not keep replaying everything
+
+## Memory Growth Reporting
+
+The memory workflow is intentionally human-style, but still evidence-bound.
+
+### Memory Layers
+
+- **Working memory** — the current working brief, active files, and validation target
+- **Episodic memory** — rollout summaries and recent task evidence
+- **Durable memory** — indexed learnings and recurring user preferences in `~/.codex/memories/MEMORY.md` and `~/.codex/memories/memory_summary.md`
+
+### Compact Learning Snapshot
+
+For non-trivial tasks, the repo guidance now supports a compact final-answer footer with:
+
+- what Codex learned today
+- mistakes and tool-use mistakes captured today
+- whether they are resolved, open, or unclear
+- heuristic memory-health stats such as brain size, brain growth, and momentum
+
+These values are derived from saved artifacts. They are not literal cognition measurements.
+
+### Run the Full Report
+
+```bash
+python3 ~/.codex/skills/memory-status-reporter/scripts/memory_status_report.py --memory-base ~/.codex/memories
+```
+
+### Run the Compact Footer Version
+
+```bash
+python3 ~/.codex/skills/memory-status-reporter/scripts/memory_status_report.py --memory-base ~/.codex/memories --format compact
 ```
 
 ## Development Workflow
 
-### Adding a New Skill
+### Update Skills
 
-1. Create skill directory: `mkdir new-skill`
-2. Create `SKILL.md` with YAML frontmatter
-3. Add reference files in `references/` directory
-4. Validate: `./sync-skills.sh validate`
-5. Sync: `./sync-skills.sh`
+```bash
+./sync-skills.sh validate
+./sync-skills.sh codex
+./sync-skills.sh status
+```
 
-### Updating Existing Skills
+### Add a New Skill
 
-1. Edit skill files
-2. Validate: `./sync-skills.sh validate`
-3. Sync: `./sync-skills.sh`
+1. Create a new root skill directory.
+2. Add `SKILL.md`.
+3. Add `references/`.
+4. Add `agents/openai.yaml`.
+5. Validate and sync.
 
-### Creating Claude-Specific Skills
+### Modular Code Preference
 
-1. Create skill in `claude/` directory
-2. Follow same structure as Codex skills
-3. Sync: `./sync-skills.sh claude`
+When you extend scripts or supporting utilities in this repo:
 
-## Reference Documentation
+- keep entrypoints thin
+- extract focused helpers instead of growing one giant function
+- separate documentation, sync logic, validation logic, and reporting logic cleanly
+- prefer incremental, surgical patches over full rewrites unless the rewrite is clearly safer
 
-Each skill includes comprehensive reference documentation:
+## Validation
 
-- **00-knowledge-map.md** - Capability matrix
-- **10-50 numbered files** - Domain-specific guidance
-- **99-source-anchors.md** - Authoritative sources
+The sync script validates:
+
+- YAML frontmatter and required metadata
+- root prompt/runtime guidance for Codex
+- same-role agent reuse and robust handoff wording
+- UI/UX strengthening and memory tool-mistake wording
+- README and validation-report inventory parity
+- top-level guidance drift and Codex-home wiring
 
 ## Troubleshooting
 
-### Sync Script Not Executable
+### Sync says config is partial
+
+Run:
 
 ```bash
-chmod +x sync-skills.sh
+./sync-skills.sh codex
+./sync-skills.sh status
 ```
 
-### Validation Failures
+Then verify `~/.codex/config.toml` contains the `memory-status-reporter` route line, the `memory-status-reporter` agent block, and the injected execution-policy lines for working briefs, context retrieval, surgical patching, modular structure, and learning snapshots.
 
-Check error messages and fix issues:
-- Missing YAML frontmatter
-- Missing required fields
-- Shortform variable names in code
+### Memory footer looks thin
 
-### Skills Not Loading
+That usually means the current memory window is quiet or the rollout summaries did not capture reusable learnings or mistakes. The system should say that directly instead of fabricating certainty.
 
-1. Check sync status: `./sync-skills.sh status`
-2. Verify target directory exists
-3. Re-sync: `./sync-skills.sh`
+## Related Docs
 
-## Contributing
-
-When contributing to skills:
-
-1. Follow existing structure
-2. Use full descriptive names (no shortforms)
-3. Include comprehensive examples
-4. Add reference documentation
-5. Validate before committing
-6. Test with actual Codex CLI or Claude Code
+- `docs/context-efficiency-playbook.md`
+- `AGENTS.md`
+- `00-skill-routing-and-escalation.md`
+- `VALIDATION_REPORT.md`
 
 ## License
 
-These skills are for personal use with Codex CLI and Claude Code.
-
-## Support
-
-For issues or questions:
-- Check validation output: `./sync-skills.sh validate`
-- Review skill documentation
-- Check Codex CLI or Claude Code documentation
+These skills are intended for personal or team use with Codex CLI.

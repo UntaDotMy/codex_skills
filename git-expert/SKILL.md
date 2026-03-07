@@ -372,7 +372,7 @@ Use single-agent for straightforward Git tasks or any task where a careful seque
 
 - If spawned sub-agents are required, wait for them to reach a terminal state before finalizing; if `wait` times out, extend the timeout, continue non-overlapping work, and wait again unless the user explicitly cancels or redirects.
 - Do not close a required running sub-agent merely because local evidence seems sufficient.
-- Keep at most one live same-role agent by default within the same project or workstream, maintain a lightweight spawned-agent list keyed by role or workstream, and check that list before `spawn_agent` so you can reuse an active or prior same-role agent via `send_input` or `resume_agent` instead of spawning a duplicate.
+- Keep at most one live same-role agent by default within the same project or workstream, maintain a lightweight spawned-agent list keyed by role or workstream, and check that list before every `spawn_agent` call. Never spawn a second same-role sub-agent if one already exists; always reuse it with `send_input` or `resume_agent`, and resume a closed same-role agent before considering any new spawn.
 - Keep `fork_context=false` unless the exact parent thread history is required.
 - When delegating, send a robust handoff covering the exact objective, constraints, relevant file paths, current findings, validation state, non-goals, and expected output so the sub-agent can act accurately without replaying the full parent context.
 

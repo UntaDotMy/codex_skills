@@ -1,15 +1,23 @@
 # Local workspace settings
-.claude/settings.local.json
+.codex/
 
 # Editor folders
 .idea/
 .vscode/
 
+# Python cache and tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
 # OS files
 .DS_Store
 Thumbs.db
 
-# Temp and log files
+# Temp, patch, and log files
 *.log
 *.tmp
 *.bak

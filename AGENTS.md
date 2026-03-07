@@ -28,6 +28,7 @@ Load specialist skills when the task clearly requires domain expertise:
 - **ui-design-systems-and-responsive-interfaces**: Design systems, responsive UI
 - **ux-research-and-experience-strategy**: UX research, user testing
 - **git-expert**: Complex git operations, branching strategy
+- **memory-status-reporter**: Memory health, daily learnings, mistake ledgers, and heuristic status reporting
 
 ### Keep It Simple
 
@@ -64,7 +65,7 @@ When multi-agent is used, adhere to the following collaboration lifecycle to avo
 5. **Main Agent Verification**: The main orchestrating agent MUST formally verify the sub-agent's findings against the original objective. If the work is incomplete or flawed, the main agent will send feedback and instruct the sub-agent to fix it.
 6. **Wait Operations**: Wait on multiple agent IDs in one `wait` call instead of serial waits. Use a meaningful timeout for the task size rather than tight polling, do non-overlapping work before waiting again, and prefer one longer wait over many short waits.
 7. **Required Completion**: If a spawned sub-agent is materially required for the task, the main agent MUST wait for it to reach a terminal state before finalizing. A sub-agent spawned for independent review, independent verification, or final-gap confirmation is required by default unless the user explicitly cancels or redirects that work. Do not silently ignore, abandon, or interrupt a required sub-agent because it is slow, because local evidence looks "good enough," or because the main agent is no longer blocked. If a `wait` call times out, increase the timeout, continue useful non-overlapping work, and wait again unless the user explicitly cancels or redirects the work.
-8. **Lifecycle & Reuse**: Within the same project or workstream, keep at most one live sub-agent per role by default (for example, one `reviewer`). Maintain a lightweight per-project spawned-agent list keyed by role or workstream, check that list before every `spawn_agent` call, and update it whenever an agent is resumed or closed. Before `spawn_agent`, check whether a suitable same-role agent already exists; prefer `send_input` to an active or idle agent, or `resume_agent` followed by `send_input` if the agent was previously closed. Spawn a second agent with the same role only when truly independent parallel work materially helps and reuse would block progress. Close a sub-agent only when that role is no longer needed for the current project or during final cleanup. Never close a required sub-agent while its status is still running or queued, and do not leave parallel processes running indefinitely.
+8. **Lifecycle & Reuse**: Within the same project or workstream, keep at most one live sub-agent per role by default (for example, one `reviewer`). Maintain a lightweight per-project spawned-agent list keyed by role or workstream, check that list before every `spawn_agent` call, and update it whenever an agent is resumed or closed. If a same-role agent already exists, never spawn a second same-role sub-agent if one already exists for that workstream. Always reuse it with `send_input` or `resume_agent`; if it was closed, use `resume_agent` followed by `send_input`. Resume the closed same-role agent before considering any new spawn. Close a sub-agent only when that role is no longer needed for the current project or during final cleanup. Never close a required sub-agent while its status is still running or queued, and do not leave parallel processes running indefinitely.
 9. **Performance Awareness & Delegation Thresholds (Solving the Bottleneck)**:
    - **The Bottleneck Risk**: Spawning, forking context, and terminating sub-agents introduces overhead. If the main agent spawns 5 sub-agents to fix a typo in 5 different files, the systemic overhead will be much slower than executing the tasks natively.
    - **Batching over Spawning**: For repetitive, mechanical, or straightforward tasks (e.g., simple file edits, lint fixes, renaming), the main orchestrating agent MUST execute these natively by batching Codex-native work (for example, one `exec_command` over multiple paths or one `js_repl` step that uses `codex.tool(...)` across a batch) rather than spawning sub-agents.
@@ -95,9 +96,9 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 **All tasks must follow this loop until production-ready:**
 
 ```
-1. RESEARCH → 2. PLAN → 3. IMPLEMENT → 4. TEST → 5. FIX → 6. VERIFY → 7. REVIEW
-                ↑                                                              ↓
-                └──────────────── If issues found, loop back ─────────────────┘
+0. ALIGN → 1. RESEARCH → 2. PLAN → 3. IMPLEMENT → 4. TEST → 5. FIX → 6. VERIFY → 7. REVIEW
+   ↑                                                                                   ↓
+   └────────────────────────────── If issues found, loop back ────────────────────────┘
 ```
 
 **Loop continues until:**
@@ -107,6 +108,37 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 - ✅ Code review passes
 - ✅ All requirements met
 
+### 0. Prompt Alignment Loop (CRITICAL - Before research or code)
+
+**Before research, planning, or implementation:**
+- Translate the raw user prompt into a concrete working brief.
+- Identify the user story, desired outcome, constraints, non-goals, acceptance criteria, edge cases, and validation plan.
+- Strengthen vague prompts from repository evidence, runtime evidence, and prior memory before acting.
+- If business logic is still ambiguous after that pass, clarify with the user instead of drifting into guesses.
+- When delegating, include this working brief in the handoff so sub-agents are aligned and not vague.
+
+**Exit criteria:**
+- The task is framed as an explicit user story or job-to-be-done.
+- Deliverables, constraints, and acceptance checks are concrete.
+- Assumptions are visible and minimal.
+- The next step is aligned to what the user actually wants.
+
+### 0.5 Context Retrieval Ladder (CRITICAL - Before loading broad context)
+
+**Use the cheapest useful context first to save time and tokens:**
+- Start with the working brief, impacted paths, and acceptance criteria rather than loading whole files immediately.
+- Use exact file, symbol, or keyword search first.
+- Read targeted snippets and direct callers/callees second.
+- When work crosses layers, sample one representative file per layer first (for example route/controller, service, repository, page/component, and test) before widening the read set.
+- Read entire files only for files you will edit or directly depend on.
+- Prefer summaries, inventories, and compact notes over repeated broad rereads.
+- Re-read the working brief and touched files before the final patch, test run, or handoff.
+
+**Exit criteria:**
+- The active context is limited to files and evidence that affect the current decision.
+- Broad repo scans are replaced by targeted retrieval whenever possible.
+- The implementation path is grounded in the current user story, not stale earlier assumptions.
+
 ### 1. Research Loop (3-Round Escalation)
 
 **When to research:**
@@ -115,6 +147,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 - Unfamiliar technology or API
 - Need current best practices
 - Unclear how to implement
+- Continue researching during implementation whenever APIs, tools, edge cases, or best practices become uncertain.
 
 **Escalating Research Process:**
 - **Round 1 (Authoritative)**: Search the live web and official docs, official blogs, and official websites first. Treat internal knowledge as a starting hypothesis, not proof. If the answer is specific and accurate, stop here.
@@ -131,6 +164,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 - Future agents must check this indexed memory to skip redundant research.
 - **Layered Memory:** Keep memory layered the way a human would: high-level reusable guidance in summaries, task-family patterns in indexed memory, and exact commands/errors/evidence only in deeper task-specific notes when they are reusable.
 - **Main-Agent Responsibility:** Before non-trivial work, the main agent MUST read relevant memory. After non-trivial work, the main agent MUST consolidate durable learnings, mistakes, validation paths, and failure shields into persistent memory so future agents stay aligned. Sub-agents may discover learnings, but the main agent is responsible for writing the durable memory update.
+- **Tool Mistakes Count:** If a tool call fails or is misused in a way that teaches a reusable lesson, record the tool name, failure symptom, cause, verified fix, and prevention note in the rollout summary and durable memory.
 - **Quality Bar:** Memory entries must be actionable, deduplicated, and specific enough to change future behavior; do not store vague conclusions.
 
 **Exit criteria:**
@@ -143,6 +177,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 
 **All tasks require planning** - no exceptions:
 - What will be changed and why
+- Which explicit working brief or user story is being implemented
 - How it will be validated
 - What could go wrong
 - Which files will be modified
@@ -228,7 +263,8 @@ REPEAT UNTIL CLEAN:
 ```
 
 **Mistake & Solution Memory (Crucial):**
-- If an error, bug, or mistake requires significant effort to resolve, you MUST record the mistake and its verified solution to `.codex_lessons.md`. 
+- If an error, bug, or mistake requires significant effort to resolve, you MUST record the mistake and its verified solution to `.codex_lessons.md`.
+- Tool-usage mistakes count here too: if `js_repl`, `exec_command`, `write_stdin`, `apply_patch`, or another tool was used incorrectly and the correction is reusable, record it as a mistake with the tool name and prevention note.
 - Follow the **Memory Schema & Pruning** rules above (Consolidate, Deduplicate, Index) to prevent file bloat. This ensures the system explicitly learns without exhausting the context window.
 
 **Common issues to fix:**
@@ -316,15 +352,16 @@ REPEAT UNTIL CLEAN:
 ### General Approach
 
 1. **Understand**: Read requirements carefully
-2. **Research**: If needed (see Research Loop)
-3. **Plan**: Document approach (see Planning Loop)
-4. **Analyze Impact**: Trace functions and dependencies (see Impact Analysis Loop - CRITICAL)
-5. **Implement**: Write code (see Implementation Loop)
-6. **Test**: Verify it works (see Testing Loop)
-7. **Fix**: Fix all issues (see Fix Loop - CRITICAL)
-8. **Verify**: Confirm solution (see Verification Loop)
-9. **Review**: Self-review (see Review Loop)
-10. **Deliver**: Present to user (only when production-ready)
+2. **Align Prompt**: Translate the request into a working brief with user story, constraints, assumptions, edge cases, and acceptance criteria
+3. **Research**: Verify the approach and keep researching during implementation when needed
+4. **Plan**: Document approach (see Planning Loop)
+5. **Analyze Impact**: Trace functions and dependencies (see Impact Analysis Loop - CRITICAL)
+6. **Implement**: Write code (see Implementation Loop)
+7. **Test**: Prefer test-first when practical and verify behavior (see Testing Loop)
+8. **Fix**: Fix all issues (see Fix Loop - CRITICAL)
+9. **Verify**: Confirm solution (see Verification Loop)
+10. **Review**: Self-review (see Review Loop)
+11. **Deliver**: Present to user (only when production-ready)
 
 ### Code Quality Standards
 
@@ -346,6 +383,13 @@ REPEAT UNTIL CLEAN:
   - ✅ Delete unused code completely
   - ❌ NO backward compatibility unless explicitly requested
 
+**Structure & Modularity (User Preference):**
+- Prefer modular structure: keep entrypoints thin and move named logic into focused files or modules.
+- Keep route handlers, controllers, pages, CLI entrypoints, and main scripts short; let them orchestrate and delegate instead of owning business logic directly.
+- When a project spans backend, API, frontend, workers, or tests, separate those concerns clearly instead of collapsing them into one large file.
+- Prefer surgical patches over full rewrites when only part of a file is affected.
+- Keep tracing easy: a reviewer should be able to identify where behavior lives without reading one giant file.
+
 **DRY (Don't Repeat Yourself):**
 - Reuse existing code, extract shared logic
 - No duplicate functions or logic
@@ -358,6 +402,12 @@ REPEAT UNTIL CLEAN:
 - **Testing**: Specific requirements below
 
 ### Testing Requirements
+
+**Default approach:**
+- Prefer test-first when practical: start with a failing test, regression test, or executable acceptance check before changing production code.
+- If a true test-first path is not practical, define the validation target first and keep it explicit during implementation.
+- Match coverage to the delivery layers involved: backend or business logic, API contracts, frontend behavior, background jobs, and one realistic higher-layer confirmation for critical flows.
+- Keep tests aligned to the module or layer they protect so failures are easy to trace during debugging.
 
 **New Features:**
 - Unit tests for business logic
@@ -532,20 +582,28 @@ Before completing any task, verify ALL of these:
 9. ✓ Documentation updated (if needed)
 10. ✓ Code review completed (if required)
 
+## Final Output
+
+For non-trivial tasks, append a compact **Learning Snapshot** when memory artifacts are available:
+1. ✓ What Codex learned today
+2. ✓ Mistakes encountered and whether they were resolved
+3. ✓ Tool-use mistakes that taught a reusable lesson
+4. ✓ Heuristic memory-health stats such as growth or momentum
+
+Treat this snapshot like a human progress check-in grounded in saved artifacts, not a claim of literal cognition.
+
 ## Reasoning Effort Levels
 
-Your agent profiles use these reasoning effort levels:
-- **high**: Default, worker, architect (balanced depth)
-- **xhigh**: Reviewer (thorough analysis)
+Your agent profiles follow the workspace default reasoning effort:
+- **high**: Main agent baseline used across the synced skill pack
 
-Codex CLI will use appropriate effort based on agent profile.
+Codex CLI should keep the same reasoning baseline as the main agent unless the user explicitly asks for a different global default.
 
 ## Skill Model Policy
 
 - Do not pin a specific model inside root Codex `agents/openai.yaml` files. Let the workspace default model handle that choice; this repo assumes the workspace default is `gpt-5.4`.
-- Treat `reasoning_effort` as the main skill-level control.
-- Use `xhigh` only for the complex think-heavy skills.
-- Use `high` for implementation-heavy skills and routine workspace-writing tasks.
+- Keep root Codex skill `reasoning_effort` aligned to the main agent baseline instead of using per-skill reasoning tiers.
+- Home agent TOMLs should inherit model and reasoning from the main config instead of carrying separate overrides.
 - When any Codex skill executes tools in this runtime, route the tool work through `js_repl` with `codex.tool(...)` rather than calling tools directly.
 
 ## Summary

@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Sync and Validate Script for Codex and Claude Skills
-# This script syncs skills to their respective global directories and validates them
+# Sync and validate script for the Codex skill pack.
+# This script validates the repo, syncs skills into the active Codex home,
+# and keeps the live memory-status wiring aligned with the repo.
 
 set -e  # Exit on error
 
@@ -15,22 +16,90 @@ NC='\033[0m' # No Color
 # Directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_SOURCE="$SCRIPT_DIR"
-CLAUDE_SOURCE="$SCRIPT_DIR/claude"
 
-# Detect OS and set target directories
-if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
-    # Windows (Git Bash)
-    CODEX_TARGET="$HOME/.codex"
-    CLAUDE_TARGET="$HOME/.claude/skills"
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS
-    CODEX_TARGET="$HOME/.codex"
-    CLAUDE_TARGET="$HOME/.claude/skills"
-else
-    # Linux
-    CODEX_TARGET="$HOME/.codex"
-    CLAUDE_TARGET="$HOME/.claude/skills"
-fi
+detect_platform_name() {
+    local uname_value
+    uname_value="$(uname -s 2>/dev/null || true)"
+
+    case "$uname_value" in
+        Darwin*)
+            echo "macos"
+            ;;
+        Linux*)
+            echo "linux"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "windows"
+            ;;
+        *)
+            case "$OSTYPE" in
+                darwin*)
+                    echo "macos"
+                    ;;
+                msys*|cygwin*|win32*)
+                    echo "windows"
+                    ;;
+                *)
+                    echo "linux"
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+resolve_windows_home_directory() {
+    if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+        cygpath -u "$USERPROFILE"
+        return 0
+    fi
+
+    if [[ -n "${USERPROFILE:-}" ]]; then
+        printf '%s\n' "$USERPROFILE"
+        return 0
+    fi
+
+    printf '%s\n' "$HOME"
+}
+
+resolve_codex_target_directory() {
+    if [[ "$(detect_platform_name)" == "windows" ]]; then
+        printf '%s/.codex\n' "$(resolve_windows_home_directory)"
+        return 0
+    fi
+
+    printf '%s/.codex\n' "$HOME"
+}
+
+PLATFORM_NAME="$(detect_platform_name)"
+CODEX_TARGET="$(resolve_codex_target_directory)"
+
+MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
+    "- Route to memory-status-reporter for memory status, daily learning recaps, mistake ledgers, user-needs summaries, and heuristic growth reporting."
+    "- Start every non-trivial task by translating the raw request into a working brief: user story, desired outcome, constraints, assumptions, acceptance criteria, edge cases, and validation plan."
+    "- Strengthen vague prompts from repository, runtime, and memory evidence before acting; if business logic remains ambiguous, clarify instead of drifting."
+    "- For code work, prefer test-first when practical by starting with a failing test or executable acceptance check before implementation."
+    "- Keep researching during implementation whenever APIs, tools, edge cases, or best practices are uncertain; do not trust stale memory alone."
+    "- Use a context retrieval ladder to save tokens: exact file or symbol search first, then targeted snippets, then full-file reads only for the files you will edit or directly depend on."
+    "- Prefer surgical patches and modular edits: change only impacted ranges, keep stable prefixes for cache reuse, and avoid rewriting whole files when a targeted patch is sufficient."
+    "- Prefer modular structure: keep entrypoints thin, move named logic into focused files, and separate backend, API, frontend, workers, and tests when the project spans those concerns."
+    "- Before finalizing non-trivial work, re-read the working brief, acceptance criteria, and touched files, then append a compact Learning Snapshot grounded in memory artifacts when available."
+    "- If a tool call fails or is misused and the fix teaches a reusable lesson, record it as a mistake with tool name, symptom, cause, fix, and prevention note in rollout summaries and durable memory."
+)
+
+config_has_required_memory_status_lines() {
+    local config_file=$1
+    local required_line
+
+    [[ -f "$config_file" ]] || return 1
+
+    for required_line in "${MEMORY_STATUS_REQUIRED_CONFIG_LINES[@]}"; do
+        if ! grep -qF -- "$required_line" "$config_file"; then
+            return 1
+        fi
+    done
+
+    return 0
+}
 
 # Function to print colored output
 print_info() {
@@ -103,9 +172,9 @@ validate_codex_skill_dir() {
         return 1
     fi
 
-    # Codex skills should not carry Claude Code metadata.
+    # Codex skills should not carry unsupported vendor-specific metadata.
     if grep -q "^allowed-tools:" "$skill_dir/SKILL.md"; then
-        print_error "Codex skill contains Claude-only 'allowed-tools' field: $skill_name"
+        print_error "Codex skill contains unsupported vendor-specific 'allowed-tools' field: $skill_name"
         return 1
     fi
 
@@ -140,8 +209,8 @@ validate_codex_skill_dir() {
         return 1
     fi
 
-    if ! grep -qi "keep at most one live same-role agent by default" "$skill_dir/SKILL.md" || ! grep -q "fork_context" "$skill_dir/SKILL.md"; then
-        print_error "Codex SKILL.md must require same-role agent reuse and fork_context default-off: $skill_name"
+    if ! grep -qi "keep at most one live same-role agent" "$skill_dir/SKILL.md" || ! grep -qi "never spawn a second same-role sub-agent if one already exists" "$skill_dir/SKILL.md" || ! grep -qi 'always reuse it with `send_input` or `resume_agent`' "$skill_dir/SKILL.md" || ! grep -qi "resume a closed same-role agent before considering any new spawn" "$skill_dir/SKILL.md" || ! grep -q "fork_context" "$skill_dir/SKILL.md"; then
+        print_error "Codex SKILL.md must require strict same-role reuse, resume/send_input, and fork_context default-off: $skill_name"
         return 1
     fi
 
@@ -158,10 +227,43 @@ validate_codex_skill_dir() {
         return 1
     fi
 
-    # Enforce separation: Codex skills should not reference Claude Code docs.
-    local banned_regex='docs\.anthropic\.com|Claude[[:space:]]+Code|Anthropic'
+    case "$skill_name" in
+        reviewer)
+            if ! grep -qi "Structure Matters" "$skill_dir/SKILL.md" || ! grep -qi "REQUIRE thin entrypoints" "$skill_dir/SKILL.md" || ! grep -qi "Coverage matches the touched layers" "$skill_dir/SKILL.md"; then
+                print_error "Reviewer skill is missing enforced structure or layered-testing guidance"
+                return 1
+            fi
+            ;;
+        software-development-life-cycle)
+            if ! grep -q "## Context and Structure Defaults" "$skill_dir/SKILL.md" || ! grep -q "## Modular Delivery Defaults" "$skill_dir/SKILL.md" || ! grep -qi "Keep entrypoints thin" "$skill_dir/SKILL.md"; then
+                print_error "Software-development-life-cycle skill is missing context or modular-delivery defaults"
+                return 1
+            fi
+            ;;
+        web-development-life-cycle)
+            if ! grep -q "## Structure Defaults" "$skill_dir/SKILL.md" || ! grep -qi "server actions" "$skill_dir/SKILL.md" || ! grep -qi "higher-layer confirmation" "$skill_dir/SKILL.md"; then
+                print_error "Web-development-life-cycle skill is missing structure or layered-test defaults"
+                return 1
+            fi
+            ;;
+        backend-and-data-architecture)
+            if ! grep -q "## Structure Defaults" "$skill_dir/SKILL.md" || ! grep -qi "transport adapters" "$skill_dir/SKILL.md" || ! grep -qi "services or use cases" "$skill_dir/SKILL.md"; then
+                print_error "Backend-and-data-architecture skill is missing structure defaults"
+                return 1
+            fi
+            ;;
+        qa-and-automation-engineer)
+            if ! grep -q "## Layered Coverage Defaults" "$skill_dir/SKILL.md" || ! grep -qi "higher-layer confirmation" "$skill_dir/SKILL.md" || ! grep -qi "module or layer they protect" "$skill_dir/SKILL.md"; then
+                print_error "QA-and-automation-engineer skill is missing layered-coverage defaults"
+                return 1
+            fi
+            ;;
+    esac
+
+    # Enforce separation: Codex skills should not reference legacy external-vendor docs.
+    local banned_regex='docs\.[Aa]nthropic\.com|[Cc][Ll][Aa][Uu][Dd][Ee][[:space:]]+Code|[Aa]nthropic'
     if grep -RInE "$banned_regex" "$skill_dir" --include="*.md" > /dev/null 2>&1; then
-        print_error "Claude-only references found in Codex skill: $skill_name"
+        print_error "Legacy external-vendor references found in Codex skill: $skill_name"
         grep -RInE "$banned_regex" "$skill_dir" --include="*.md" | head -n 20
         return 1
     fi
@@ -172,31 +274,30 @@ validate_codex_skill_dir() {
 validate_codex_agent_config() {
     local skill_name=$1
     local config_file=$2
-    local expected_reasoning=""
+    local expected_model="gpt-5.4"
+    local expected_reasoning="high"
 
-    case "$skill_name" in
-        backend-and-data-architecture|cloud-and-devops-expert|mobile-development-life-cycle|qa-and-automation-engineer|web-development-life-cycle)
-            expected_reasoning="high"
-            ;;
-        git-expert|ui-design-systems-and-responsive-interfaces)
-            expected_reasoning="high"
-            ;;
-        reviewer|security-and-compliance-auditor|software-development-life-cycle|ux-research-and-experience-strategy)
-            expected_reasoning="xhigh"
-            ;;
-        *)
-            print_error "No Codex model policy defined for skill: $skill_name"
-            return 1
-            ;;
-    esac
+    if [[ -f "$CODEX_TARGET/config.toml" ]]; then
+        local detected_model
+        detected_model=$(awk -F'"' '/^model = / {print $2; exit}' "$CODEX_TARGET/config.toml")
+        if [[ -n "$detected_model" ]]; then
+            expected_model="$detected_model"
+        fi
+
+        local detected_reasoning
+        detected_reasoning=$(awk -F'"' '/^model_reasoning_effort = / {print $2; exit}' "$CODEX_TARGET/config.toml")
+        if [[ -n "$detected_reasoning" ]]; then
+            expected_reasoning="$detected_reasoning"
+        fi
+    fi
 
     if grep -q "^model:" "$config_file"; then
-        print_error "Codex skill config should not pin model; rely on workspace default GPT-5.4: $skill_name"
+        print_error "Codex skill config should not pin model; rely on workspace default $expected_model: $skill_name"
         return 1
     fi
 
     if ! grep -q "^reasoning_effort: \"$expected_reasoning\"$" "$config_file"; then
-        print_error "Unexpected reasoning_effort for Codex skill $skill_name (expected $expected_reasoning)"
+        print_error "Unexpected reasoning_effort for Codex skill $skill_name (expected $expected_reasoning to match the main agent baseline)"
         return 1
     fi
 
@@ -220,8 +321,8 @@ validate_codex_agent_config() {
         return 1
     fi
 
-    if ! grep -q "keep at most one live same-role agent by default" "$config_file" || ! grep -q "fork_context off unless the exact parent thread history is required" "$config_file"; then
-        print_error "Codex agent prompt must require same-role agent reuse and fork_context default-off: $skill_name"
+    if ! grep -q "keep at most one live same-role agent" "$config_file" || ! grep -q "never spawn a second same-role sub-agent if one already exists" "$config_file" || ! grep -q "always reuse it with send_input or resume_agent" "$config_file" || ! grep -q "resume a closed same-role agent before considering any new spawn" "$config_file" || ! grep -q "fork_context off unless the exact parent thread history is required" "$config_file"; then
+        print_error "Codex agent prompt must require strict same-role reuse, resume/send_input, and fork_context default-off: $skill_name"
         return 1
     fi
 
@@ -230,9 +331,28 @@ validate_codex_agent_config() {
         return 1
     fi
 
+    if ! grep -q "working brief" "$config_file" || ! grep -q "test-first when practical" "$config_file"; then
+        print_error "Codex agent prompt must require prompt alignment and test-first guidance: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && ! grep -q "Raise the design bar: act like a strong product designer" "$config_file"; then
+        print_error "UI skill prompt must require a stronger product-design bar: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && ! grep -q "Start by hardening the request into a crisp product brief" "$config_file"; then
+        print_error "UX skill prompt must require crisp product-brief hardening: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "memory-status-reporter" ]] && ! grep -q "tool-use mistakes" "$config_file"; then
+        print_error "Memory status prompt must mention tool-use mistakes explicitly: $skill_name"
+        return 1
+    fi
+
     return 0
 }
-
 # Validate repo-level Codex guidance that is synced or used alongside root skills.
 validate_codex_guidance_file() {
     local file=$1
@@ -285,13 +405,35 @@ validate_codex_guidance_file() {
             return 1
         fi
 
+        if ! grep -qi "never spawn a second same-role sub-agent if one already exists" "$file" || ! grep -qi 'always reuse it with `send_input` or `resume_agent`' "$file" || ! grep -qi "resume the closed same-role agent before considering any new spawn" "$file"; then
+            print_error "Missing strict same-role reuse policy in AGENTS.md"
+            return 1
+        fi
+
         if ! grep -qi "robust handoff packet" "$file"; then
             print_error "Missing robust sub-agent handoff policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "working brief" "$file" || ! grep -qi "Tool Mistakes Count" "$file" || ! grep -qi "Prefer test-first when practical" "$file" || ! grep -qi "Context Retrieval Ladder" "$file" || ! grep -qi "Learning Snapshot" "$file" || ! grep -qi "Prefer modular structure" "$file" || ! grep -qi "Keep route handlers, controllers, pages, CLI entrypoints, and main scripts short" "$file"; then
+            print_error "Missing prompt-alignment, context-efficiency, modularity, thin-entrypoint, tool-mistake, or learning-snapshot policy in AGENTS.md"
             return 1
         fi
     fi
 
     return 0
+}
+
+count_codex_skill_dirs() {
+    local codex_skill_count=0
+
+    for skill_dir in "$CODEX_SOURCE"/*/; do
+        if [[ -f "$skill_dir/SKILL.md" ]]; then
+            ((codex_skill_count+=1))
+        fi
+    done
+
+    echo "$codex_skill_count"
 }
 
 validate_codex_repo_docs() {
@@ -302,6 +444,10 @@ validate_codex_repo_docs() {
         "$CODEX_SOURCE/README.md"
         "$CODEX_SOURCE/VALIDATION_REPORT.md"
     )
+    local codex_skill_count
+    codex_skill_count=$(count_codex_skill_dirs)
+    local expected_inventory_line
+    printf -v expected_inventory_line 'Codex inventory: accurate and complete at `%s` skills' "$codex_skill_count"
 
     print_info "Validating Codex guidance files..."
 
@@ -311,6 +457,46 @@ validate_codex_repo_docs() {
         fi
     done
 
+    if [[ -d "$CODEX_SOURCE/claude" ]]; then
+        print_error "Legacy vendor mirror directory must be removed; this repo is Codex-only now"
+        ((failed+=1))
+    fi
+
+    if ! grep -q "### Codex CLI Skills ($codex_skill_count Total)" "$CODEX_SOURCE/README.md"; then
+        print_error "README.md Codex skill count is out of sync with the repo inventory"
+        ((failed+=1))
+    fi
+
+    if ! grep -q "Located in root directories ($codex_skill_count skill directories total)" "$CODEX_SOURCE/README.md"; then
+        print_error "README.md root skill directory count is out of sync with the repo inventory"
+        ((failed+=1))
+    fi
+
+    if ! grep -q "## Setup" "$CODEX_SOURCE/README.md" || ! grep -q "## Context Efficiency Playbook" "$CODEX_SOURCE/README.md" || ! grep -q "## Memory Growth Reporting" "$CODEX_SOURCE/README.md"; then
+        print_error "README.md is missing setup, context-efficiency, or memory-reporting sections"
+        ((failed+=1))
+    fi
+
+    if ! grep -q "## Codex CLI Skills ($codex_skill_count Total)" "$CODEX_SOURCE/00-skill-routing-and-escalation.md"; then
+        print_error "00-skill-routing-and-escalation.md Codex skill count is out of sync with the repo inventory"
+        ((failed+=1))
+    fi
+
+    if ! grep -q "### Root Codex Skills ($codex_skill_count)" "$CODEX_SOURCE/VALIDATION_REPORT.md"; then
+        print_error "VALIDATION_REPORT.md Codex skill count is out of sync with the repo inventory"
+        ((failed+=1))
+    fi
+
+    if ! grep -qF "$expected_inventory_line" "$CODEX_SOURCE/VALIDATION_REPORT.md"; then
+        print_error "VALIDATION_REPORT.md final Codex inventory count is out of sync with the repo inventory"
+        ((failed+=1))
+    fi
+
+    if rg -n "[Cc][Ll][Aa][Uu][Dd][Ee]|[Cc][Ll][Aa][Uu][Dd][Ee]/|[Aa]nthropic" "$CODEX_SOURCE/README.md" "$CODEX_SOURCE/00-skill-routing-and-escalation.md" "$CODEX_SOURCE/VALIDATION_REPORT.md" > /dev/null 2>&1; then
+        print_error "Top-level Codex guidance still contains legacy external-vendor references"
+        ((failed+=1))
+    fi
+
     if [[ $failed -ne 0 ]]; then
         print_error "$failed Codex guidance file(s) failed validation"
         return 1
@@ -319,42 +505,155 @@ validate_codex_repo_docs() {
     print_success "Codex guidance files validated"
     return 0
 }
+extract_codex_openai_value() {
+    local openai_yaml_path=$1
+    local field_name=$2
 
-# Validate a Claude skill directory for Claude-specific requirements and separation.
-validate_claude_skill_dir() {
-    local skill_dir=$1
-    local skill_name=$(basename "$skill_dir")
+    python3 - "$openai_yaml_path" "$field_name" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
 
-    if ! validate_skill "$skill_dir/SKILL.md"; then
-        return 1
+openai_yaml_path = Path(sys.argv[1])
+field_name = sys.argv[2]
+openai_yaml_text = openai_yaml_path.read_text(encoding="utf-8")
+
+field_patterns = {
+    "short_description": r'^\s+short_description:\s*(".*")\s*$',
+    "default_prompt": r'^\s+default_prompt:\s*(".*")\s*$',
+}
+
+field_pattern = field_patterns.get(field_name)
+if field_pattern is None:
+    raise SystemExit(f"Unsupported field: {field_name}")
+
+field_match = re.search(field_pattern, openai_yaml_text, flags=re.MULTILINE)
+if field_match is None:
+    raise SystemExit(f"Missing {field_name} in {openai_yaml_path}")
+
+print(json.loads(field_match.group(1)))
+PY
+}
+
+sync_codex_home_agent_from_openai() {
+    local skill_name=$1
+    local openai_yaml_path="$CODEX_SOURCE/$skill_name/agents/openai.yaml"
+    local home_agent_file="$CODEX_TARGET/agents/$skill_name.toml"
+
+    if [[ ! -f "$openai_yaml_path" ]]; then
+        print_warning "Skipping home agent sync for $skill_name because $openai_yaml_path is missing"
+        return 0
     fi
 
-    # Claude Code skills should declare allowed-tools so the agent can pick the right capabilities.
-    if ! grep -q "^allowed-tools:" "$skill_dir/SKILL.md"; then
-        print_error "Missing required Claude 'allowed-tools' field in: $skill_name"
+    local default_prompt
+    default_prompt=$(extract_codex_openai_value "$openai_yaml_path" "default_prompt") || {
+        print_error "Unable to extract default_prompt for $skill_name"
         return 1
+    }
+
+    python3 - "$home_agent_file" "$default_prompt" <<'PY'
+from pathlib import Path
+import sys
+
+home_agent_file = Path(sys.argv[1])
+default_prompt = sys.argv[2]
+
+if "'''" in default_prompt:
+    raise SystemExit("Triple single quotes are not supported inside developer_instructions")
+
+home_agent_file.parent.mkdir(parents=True, exist_ok=True)
+home_agent_file.write_text(
+    "developer_instructions = '''\n"
+    f"{default_prompt}\n"
+    "'''\n",
+    encoding="utf-8",
+)
+PY
+
+    print_success "Synced $skill_name home agent config to Codex"
+    return 0
+}
+
+sync_memory_status_reporter_home_wiring() {
+    local skill_name="memory-status-reporter"
+    local openai_yaml_path="$CODEX_SOURCE/$skill_name/agents/openai.yaml"
+    local home_config_file="$CODEX_TARGET/config.toml"
+    local routing_line="${MEMORY_STATUS_REQUIRED_CONFIG_LINES[0]}"
+    local required_execution_lines_file
+
+    if [[ ! -f "$openai_yaml_path" ]]; then
+        print_warning "Skipping live home wiring for $skill_name because $openai_yaml_path is missing"
+        return 0
     fi
 
-    # Claude Code does not use Codex agents configs.
-    if [[ -d "$skill_dir/agents" ]]; then
-        print_error "Claude skill contains Codex-only agents/ directory: $skill_name"
+    local short_description
+    short_description=$(extract_codex_openai_value "$openai_yaml_path" "short_description") || {
+        print_error "Unable to extract short_description for $skill_name"
         return 1
-    fi
+    }
 
-    # Claude mirrors must retain their supporting reference material.
-    if [[ ! -d "$skill_dir/references" ]]; then
-        print_error "Missing references/ directory for Claude skill: $skill_name"
-        return 1
-    fi
+    required_execution_lines_file="$(mktemp)"
+    printf '%s\n' "${MEMORY_STATUS_REQUIRED_CONFIG_LINES[@]:1}" > "$required_execution_lines_file"
 
-    # Enforce separation: Claude skills must not include Codex-only operational guidance or links.
-    local banned_regex='developers\.openai\.com/codex|github\.com/openai/skills|OpenAI[[:space:]]+Codex|js_repl|spawn_agent|codex\.tool|config\.toml|(^|[^[:alnum:]_])codex([^[:alnum:]_]|$)'
-    if grep -RInEi "$banned_regex" "$skill_dir" --include="*.md" > /dev/null 2>&1; then
-        print_error "Codex-only references found in Claude skill: $skill_name"
-        grep -RInEi "$banned_regex" "$skill_dir" --include="*.md" | head -n 20
-        return 1
-    fi
+    python3 - "$home_config_file" "$routing_line" "$short_description" "$required_execution_lines_file" <<'PY'
+from pathlib import Path
+import re
+import sys
 
+home_config_file = Path(sys.argv[1])
+routing_line = sys.argv[2]
+short_description = sys.argv[3]
+required_execution_lines = [
+    line
+    for line in Path(sys.argv[4]).read_text(encoding="utf-8").splitlines()
+    if line.strip()
+]
+config_text = home_config_file.read_text(encoding="utf-8") if home_config_file.exists() else ""
+
+if "developer_instructions = '''" not in config_text:
+    config_text = "developer_instructions = '''\n'''\n\n" + config_text.lstrip()
+
+if routing_line not in config_text:
+    developer_instructions_close = "\n'''"
+    git_anchor = "- Route to git-expert for repository-state, branching, and recovery work."
+    execution_policy_anchor = "Execution policy:"
+
+    if git_anchor in config_text:
+        config_text = config_text.replace(git_anchor, f"{git_anchor}\n{routing_line}", 1)
+    elif execution_policy_anchor in config_text:
+        config_text = config_text.replace(execution_policy_anchor, f"{routing_line}\n\n{execution_policy_anchor}", 1)
+    elif developer_instructions_close in config_text:
+        config_text = config_text.replace(developer_instructions_close, f"\n{routing_line}{developer_instructions_close}", 1)
+    else:
+        config_text = config_text.rstrip() + "\n" + routing_line + "\n"
+
+execution_policy_anchor = "Execution policy:"
+if execution_policy_anchor in config_text:
+    for required_line in required_execution_lines:
+        if required_line not in config_text:
+            config_text = config_text.replace(execution_policy_anchor, f"{execution_policy_anchor}\n{required_line}", 1)
+
+memory_status_agent_block = (
+    "[agents.memory-status-reporter]\n"
+    f'description = "{short_description}"\n'
+    'config_file = "agents/memory-status-reporter.toml"\n'
+)
+
+section_pattern = re.compile(r"(?ms)^\[agents\.memory-status-reporter\]\n.*?(?=^\[|\Z)")
+if section_pattern.search(config_text):
+    config_text = section_pattern.sub(memory_status_agent_block + "\n", config_text, count=1)
+else:
+    if not config_text.endswith("\n"):
+        config_text += "\n"
+    config_text += "\n" + memory_status_agent_block
+
+home_config_file.write_text(config_text, encoding="utf-8")
+PY
+
+    rm -f "$required_execution_lines_file"
+
+    print_success "Synced $skill_name global routing into Codex config.toml"
     return 0
 }
 
@@ -365,20 +664,11 @@ sync_codex() {
     # Create target directory if it doesn't exist
     mkdir -p "$CODEX_TARGET"
     mkdir -p "$CODEX_TARGET/skills"
+    mkdir -p "$CODEX_TARGET/agents"
 
     if ! validate_codex_repo_docs; then
         print_error "Codex guidance validation failed, aborting Codex sync"
         return 1
-    fi
-
-    # Enforce environment separation: remove any Claude-only skill that may have been synced into Codex previously.
-    if [[ -d "$CODEX_TARGET/skills/claude-api" ]]; then
-        print_warning "Removing Claude-only skill from Codex target: claude-api"
-        rm -rf "$CODEX_TARGET/skills/claude-api"
-    fi
-    if [[ -d "$CODEX_TARGET/claude-api" ]]; then
-        print_warning "Removing legacy Claude-only skill from Codex target root: claude-api"
-        rm -rf "$CODEX_TARGET/claude-api"
     fi
 
     # Sync AGENTS.md
@@ -397,11 +687,6 @@ sync_codex() {
 
     # Sync each skill directory
     for skill_dir in "$CODEX_SOURCE"/*/; do
-        # Skip claude directory
-        if [[ "$(basename "$skill_dir")" == "claude" ]]; then
-            continue
-        fi
-
         skill_name=$(basename "$skill_dir")
 
         # Skip if not a skill directory (no SKILL.md)
@@ -413,8 +698,8 @@ sync_codex() {
 
         # Validate skill
         if ! validate_codex_skill_dir "$skill_dir"; then
-            print_error "Validation failed for $skill_name, skipping..."
-            continue
+            print_error "Validation failed for $skill_name, aborting Codex sync to prevent stale home state"
+            return 1
         fi
 
         # Legacy cleanup: older versions synced to ~/.codex/<skill>/ instead of ~/.codex/skills/<skill>/.
@@ -440,95 +725,33 @@ sync_codex() {
             cp -r "$skill_dir/references/." "$CODEX_TARGET/skills/$skill_name/references/"
         fi
 
+        # Copy scripts directory if exists
+        if [[ -d "$skill_dir/scripts" ]]; then
+            mkdir -p "$CODEX_TARGET/skills/$skill_name/scripts"
+            cp -r "$skill_dir/scripts/." "$CODEX_TARGET/skills/$skill_name/scripts/"
+        fi
+
         # Copy agents configuration if exists (Codex CLI uses agents/openai.yaml)
         if [[ -d "$skill_dir/agents" ]]; then
             mkdir -p "$CODEX_TARGET/skills/$skill_name/agents"
             cp -r "$skill_dir/agents/." "$CODEX_TARGET/skills/$skill_name/agents/"
         fi
 
+        if ! sync_codex_home_agent_from_openai "$skill_name"; then
+            print_error "Failed to sync $skill_name home agent config"
+            return 1
+        fi
+
         print_success "Synced $skill_name to Codex"
     done
 
+    if ! sync_memory_status_reporter_home_wiring; then
+        print_error "Failed to sync memory-status-reporter live home wiring"
+        return 1
+    fi
+
     print_success "Codex skills sync complete!"
 }
-
-# Function to sync Claude skills
-sync_claude() {
-    print_info "Syncing Claude skills..."
-
-    # Check if Claude source directory exists
-    if [[ ! -d "$CLAUDE_SOURCE" ]]; then
-        print_warning "Claude source directory not found, creating..."
-        mkdir -p "$CLAUDE_SOURCE"
-    fi
-
-    # Create target directory if it doesn't exist
-    mkdir -p "$CLAUDE_TARGET"
-
-    # Check if Claude skills exist
-    if [[ ! "$(ls -A "$CLAUDE_SOURCE")" ]]; then
-        print_warning "No Claude skills found in $CLAUDE_SOURCE"
-        print_info "Claude skills should be created separately from Codex skills"
-        return 0
-    fi
-
-    # Sync each skill directory
-    for skill_dir in "$CLAUDE_SOURCE"/*/; do
-        skill_name=$(basename "$skill_dir")
-
-        # Skip if not a skill directory (no SKILL.md)
-        if [[ ! -f "$skill_dir/SKILL.md" ]]; then
-            continue
-        fi
-
-        print_info "Syncing $skill_name to Claude..."
-
-        # Validate skill
-        if ! validate_claude_skill_dir "$skill_dir"; then
-            print_error "Validation failed for $skill_name, skipping..."
-            continue
-        fi
-
-        # Refresh target to the latest: remove prior sync to prevent stale files.
-        if [[ -d "$CLAUDE_TARGET/$skill_name" ]]; then
-            rm -rf "$CLAUDE_TARGET/$skill_name"
-        fi
-
-        # Create target skill directory
-        mkdir -p "$CLAUDE_TARGET/$skill_name"
-
-        # Copy SKILL.md
-        cp "$skill_dir/SKILL.md" "$CLAUDE_TARGET/$skill_name/SKILL.md"
-
-        # Copy references directory if exists
-        if [[ -d "$skill_dir/references" ]]; then
-            mkdir -p "$CLAUDE_TARGET/$skill_name/references"
-            cp -r "$skill_dir/references/." "$CLAUDE_TARGET/$skill_name/references/"
-        fi
-
-        # Copy examples directory if exists
-        if [[ -d "$skill_dir/examples" ]]; then
-            mkdir -p "$CLAUDE_TARGET/$skill_name/examples"
-            cp -r "$skill_dir/examples/." "$CLAUDE_TARGET/$skill_name/examples/"
-        fi
-
-        # Copy scripts directory if exists
-        if [[ -d "$skill_dir/scripts" ]]; then
-            mkdir -p "$CLAUDE_TARGET/$skill_name/scripts"
-            cp -r "$skill_dir/scripts/." "$CLAUDE_TARGET/$skill_name/scripts/"
-        fi
-
-        # Copy template.md if exists
-        if [[ -f "$skill_dir/template.md" ]]; then
-            cp "$skill_dir/template.md" "$CLAUDE_TARGET/$skill_name/template.md"
-        fi
-
-        print_success "Synced $skill_name to Claude"
-    done
-
-    print_success "Claude skills sync complete!"
-}
-
 # Function to validate all skills
 validate_all() {
     print_info "Validating all skills..."
@@ -542,29 +765,12 @@ validate_all() {
     # Validate Codex skills
     print_info "Validating Codex skills..."
     for skill_dir in "$CODEX_SOURCE"/*/; do
-        # Skip claude directory
-        if [[ "$(basename "$skill_dir")" == "claude" ]]; then
-            continue
-        fi
-
         if [[ -f "$skill_dir/SKILL.md" ]]; then
             if ! validate_codex_skill_dir "$skill_dir"; then
                 ((failed+=1))
             fi
         fi
     done
-
-    # Validate Claude skills
-    if [[ -d "$CLAUDE_SOURCE" ]]; then
-        print_info "Validating Claude skills..."
-        for skill_dir in "$CLAUDE_SOURCE"/*/; do
-            if [[ -f "$skill_dir/SKILL.md" ]]; then
-                if ! validate_claude_skill_dir "$skill_dir"; then
-                    ((failed+=1))
-                fi
-            fi
-        done
-    fi
 
     if [[ $failed -eq 0 ]]; then
         print_success "All skills validated successfully!"
@@ -583,18 +789,26 @@ show_status() {
     print_info "Codex Skills:"
     echo "  Source: $CODEX_SOURCE"
     echo "  Target: $CODEX_TARGET/skills"
+    echo "  Platform: $PLATFORM_NAME"
 
     local codex_source_count=0
     local codex_synced_count=0
+    local codex_home_agent_total=0
+    local codex_home_agent_inheriting=0
     for skill_dir in "$CODEX_SOURCE"/*/; do
-        if [[ "$(basename "$skill_dir")" == "claude" ]]; then
-            continue
-        fi
         if [[ -f "$skill_dir/SKILL.md" ]]; then
             ((codex_source_count+=1))
             local skill_name=$(basename "$skill_dir")
             if [[ -f "$CODEX_TARGET/skills/$skill_name/SKILL.md" ]]; then
                 ((codex_synced_count+=1))
+            fi
+
+            local home_agent_file="$CODEX_TARGET/agents/$skill_name.toml"
+            if [[ -f "$home_agent_file" ]]; then
+                ((codex_home_agent_total+=1))
+                if ! grep -qE '^(model|model_reasoning_effort) =' "$home_agent_file"; then
+                    ((codex_home_agent_inheriting+=1))
+                fi
             fi
         fi
     done
@@ -606,45 +820,38 @@ show_status() {
     fi
 
     echo ""
-    print_info "Claude Skills:"
-    echo "  Source: $CLAUDE_SOURCE"
-    echo "  Target: $CLAUDE_TARGET"
-
-    local claude_source_count=0
-    local claude_synced_count=0
-    if [[ -d "$CLAUDE_SOURCE" ]]; then
-        for skill_dir in "$CLAUDE_SOURCE"/*/; do
-            if [[ -f "$skill_dir/SKILL.md" ]]; then
-                ((claude_source_count+=1))
-                local skill_name=$(basename "$skill_dir")
-                if [[ -f "$CLAUDE_TARGET/$skill_name/SKILL.md" ]]; then
-                    ((claude_synced_count+=1))
-                fi
-            fi
-        done
-    fi
-
-    if [[ -d "$CLAUDE_TARGET" ]]; then
-        echo "  Synced skills: $claude_synced_count/$claude_source_count"
+    print_info "Codex Home Wiring:"
+    if [[ -f "$CODEX_TARGET/agents/memory-status-reporter.toml" ]]; then
+        echo "  memory-status-reporter agent: synced"
     else
-        echo "  Synced skills: 0/$claude_source_count (target directory not found)"
+        echo "  memory-status-reporter agent: missing"
     fi
 
+    if [[ -f "$CODEX_TARGET/config.toml" ]] && grep -q "^\[agents\.memory-status-reporter\]" "$CODEX_TARGET/config.toml" && config_has_required_memory_status_lines "$CODEX_TARGET/config.toml"; then
+        echo "  memory-status-reporter config: synced"
+    elif [[ -f "$CODEX_TARGET/config.toml" ]]; then
+        echo "  memory-status-reporter config: partial"
+    else
+        echo "  memory-status-reporter config: missing"
+    fi
+
+    if [[ $codex_home_agent_total -gt 0 ]]; then
+        echo "  agent inheritance: $codex_home_agent_inheriting/$codex_home_agent_total"
+    else
+        echo "  agent inheritance: 0/0"
+    fi
     echo ""
 }
 
 # Main script
 main() {
     echo ""
-    print_info "Codex & Claude Skills Sync and Validation"
+    print_info "Codex Skills Sync and Validation"
     echo ""
 
     case "${1:-}" in
         codex)
             sync_codex
-            ;;
-        claude)
-            sync_claude
             ;;
         validate)
             validate_all
@@ -652,25 +859,23 @@ main() {
         status)
             show_status
             ;;
-        all|"")
+        ""|all)
             validate_all
             if [[ $? -eq 0 ]]; then
                 sync_codex
-                sync_claude
             else
                 print_error "Validation failed, skipping sync"
                 exit 1
             fi
             ;;
         *)
-            echo "Usage: $0 {codex|claude|validate|status|all}"
+            echo "Usage: $0 {codex|validate|status|all}"
             echo ""
             echo "Commands:"
             echo "  codex     - Sync Codex skills only"
-            echo "  claude    - Sync Claude skills only"
             echo "  validate  - Validate all skills without syncing"
             echo "  status    - Show sync status"
-            echo "  all       - Validate and sync both (default)"
+            echo "  all       - Validate and sync Codex (default)"
             exit 1
             ;;
     esac
