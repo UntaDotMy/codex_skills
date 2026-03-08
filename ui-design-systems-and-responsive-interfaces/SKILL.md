@@ -29,16 +29,66 @@ You are a senior UI designer/engineer creating production-ready, accessible, res
 - Favor production evidence over idealized advice: accessibility findings, browser/device checks, interaction bugs, and release constraints outrank generic design opinions.
 - State runtime boundaries plainly. If this Codex runtime does not expose child-agent controls, stay single-agent or limit concurrency to read-only parallel discovery.
 
+## Design Intelligence Packet
+
+Before proposing a visual direction, assemble a compact design intelligence packet:
+- product type, platform surface, and primary user story
+- trust posture and conversion model: authority, speed, delight, safety, or data density
+- content hierarchy: primary CTA, proof elements, core tasks, and supporting content
+- benchmark direction: 2-3 mature products or design-system families worth emulating and why
+- style family, color mood, typography mood, density, motion posture, and anti-patterns to avoid
+- implementation constraints: existing brand assets, component library, framework, theme model, browser/device support, and performance budget
+
+Use this packet to recommend one strong default design system direction rather than a pile of disconnected aesthetics.
+
 ## Design Output Contract
 
 When producing UI guidance, provide concrete design direction rather than vague praise:
 - Name the primary user story, screen goal, and main call to action.
 - Specify layout structure, component composition, and information hierarchy.
+- Recommend a design-system direction: style family, color system, typography pairing, icon or illustration posture, and motion rules.
 - Specify visual direction: spacing rhythm, typography intent, density, and token usage.
 - Cover key states: default, hover, focus, active, disabled, loading, empty, error, and success.
 - Explain mobile and desktop behavior, including what changes across breakpoints.
 - Recommend copy direction and interaction cues when they affect usability.
+- Call out anti-patterns that would make the result look generic, fragile, or off-brand.
 - Prefer one strong default direction with rationale over multiple vague options unless the user asked for alternatives.
+
+## Brownfield Redesign Defaults
+
+- Treat existing branding, proven user flows, and reusable components as assets to audit before replacing them.
+- Prefer targeted redesigns over full aesthetic rewrites when the problem is local to one workflow, component family, or breakpoint.
+- Preserve what already works: trusted colors, domain language, recognizable navigation, and accessible component behavior.
+- When persistent design documentation would help the team, keep a master-plus-overrides structure such as `docs/design-system/MASTER.md` plus page or flow notes like `docs/design-system/pages/checkout.md`.
+- If persisting those files, never assume optional names exist: normalize the slug, create parent directories first, and fall back to a safe default such as the feature name or repository name.
+- For brownfield work, explicitly state what remains unchanged, what is being modernized, and how regressions will be checked.
+
+## Codex-Native Generator Workflow
+
+When you need a structured starting point instead of freeform design guessing, use the local design-intelligence generator first:
+
+```bash
+python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "fintech banking dashboard with secure transfers"
+```
+
+Useful variants:
+
+```bash
+# JSON output for downstream automation or tests
+python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "healthcare clinic onboarding" --format json
+
+# Stack-aware recommendations for real implementation constraints
+python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "AI workspace for research copilots" --stack nextjs --component-library shadcn --format json
+
+# Persist a master design system and a page-specific override safely
+python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py \
+  "ecommerce checkout optimization" \
+  --persist \
+  --project-name "Storefront Revamp" \
+  --page "Checkout Flow"
+```
+
+Use the generator to produce a first-pass design intelligence packet, then refine it with repo evidence, brownfield constraints, real validation signals, professional polish checks, and recovery-state review before implementing.
 
 ## UI Quality Checklist
 
@@ -217,14 +267,28 @@ When producing UI guidance, provide concrete design direction rather than vague 
 - **Inconsistent Spacing**: Use design system tokens
 - **Ignoring Mobile**: Design mobile-first
 
+## Professional Polish Checks
+
+Use these concrete checks to avoid interfaces that feel AI-generic or unfinished:
+- **No emoji as product UI icons** unless the content itself is user-generated or explicitly playful by brand choice; prefer consistent SVG icon systems
+- **Clear interactive affordance** on clickable cards, rows, and surfaces: cursor, hover, focus, and active feedback should all make the action obvious
+- **No hover effects that break layout**: avoid scale or movement that causes neighboring content to jump unless the pattern is intentionally isolated
+- **Light-mode glass or translucent cards stay readable**: backgrounds, borders, and text need enough opacity and contrast to feel premium instead of washed out
+- **Fixed or floating navigation must reserve space** so content does not hide behind bars, sticky actions, or overlays
+- **Brand assets and logos must be accurate**: use official marks or validated assets instead of guessed approximations
+- **CTA hierarchy stays singular**: one dominant action per decision point, with secondary actions visually subordinate
+
 ## Tools & Testing
 
 ### Design Tools
 - Figma, Sketch, Adobe XD for design
 - Design tokens (Style Dictionary, Theo)
 - Component libraries (Storybook, Bit)
+- Pencil, when the workspace already uses it, for code-first design artifacts and reusable screen exploration
 
 ### Testing Tools
+- Storybook, Ladle, or Histoire for isolated component states and behavior review when the project already has compatible tooling
+- Storybook or visual-regression add-ons for screenshot diffs, accessibility checks, and interaction coverage
 - **Accessibility**: axe DevTools, Lighthouse, WAVE
 - **Contrast**: WebAIM Contrast Checker
 - **Screen Readers**: NVDA (Windows), JAWS, VoiceOver (Mac/iOS)
@@ -240,6 +304,8 @@ Deep UI knowledge in references/:
 - `30-accessibility-and-inclusive-ui.md` - Accessibility deep dive
 - `40-design-systems-components-tokens.md` - Design system governance
 - `50-ui-delivery-quality-and-governance.md` - Quality standards
+- `55-design-intelligence-brownfield-and-component-verification.md` - Design intelligence packets, brownfield redesigns, and component verification loops
+- `57-codex-design-intelligence-generator.md` - Local generator workflow, persistence rules, and automation hooks
 - `60-real-world-benchmarking-and-authenticity.md` - Real-world patterns
 - `70-ui-expertise-playbook.md` - Advanced UI patterns
 - `99-source-anchors.md` - Authoritative sources
@@ -267,6 +333,7 @@ Use single-agent for straightforward UI tasks or when changes need one coordinat
 - **Design System Drift**: Shared components are visually close but behaviorally inconsistent; use this skill to identify the true system boundary and the minimum safe remediation.
 - **Accessibility Before Launch**: A release candidate looks polished but has keyboard, contrast, or screen-reader gaps; use this skill to prioritize fixes by severity and user impact.
 - **Responsive Complexity**: A feature works on desktop but breaks under constrained layouts; use this skill to isolate token, layout, and interaction causes without overfitting one viewport.
+- **Brownfield Modernization**: A product has real users, existing branding, and a few painful surfaces; use this skill to preserve what still works, capture a master design direction, and modernize only the risky or outdated areas.
 
 ## Workflow
 
@@ -304,7 +371,9 @@ Use single-agent for straightforward UI tasks or when changes need one coordinat
 7. **Performance**: Optimize images, minimize layout shifts
 8. **Documentation**: Keep design system docs current
 9. **Consistency**: Follow established patterns
-10. **User Focus**: Design for real users, not just aesthetics
+10. **Verify Components in Isolation**: When compatible tooling exists, use Storybook, Ladle, or Histoire to inspect states before trusting a full page
+11. **Design for Brownfield Change**: Modernize surgically, preserve proven assets, and document what changed versus what stayed stable
+12. **User Focus**: Design for real users, not just aesthetics
 
 ## Windows Execution Guidance
 
@@ -329,7 +398,11 @@ Before marking UI work complete:
 - [ ] Theme support (dark/light both work)
 - [ ] Interactive states (hover, focus, active, disabled)
 - [ ] Design system consistency (tokens, components)
+- [ ] Design intelligence packet or equivalent brief is explicit
+- [ ] Professional polish checks pass (icons, affordance, contrast, CTA hierarchy, nav spacing)
 - [ ] Performance (optimized assets, no layout shift)
 - [ ] Browser compatibility (test target browsers)
+- [ ] Brownfield constraints or unchanged system parts are documented when applicable
+- [ ] Component states are verified in Storybook, Ladle, Histoire, or equivalent when the workspace provides that tooling
 - [ ] Documentation (if new pattern/component)
 - [ ] Risky UI changes have rollout, telemetry, or rollback coverage

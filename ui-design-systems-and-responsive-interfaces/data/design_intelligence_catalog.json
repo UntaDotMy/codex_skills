@@ -1,0 +1,503 @@
+{
+  "product_archetypes": [
+    {
+      "id": "saas-dashboard",
+      "display_name": "SaaS Dashboard",
+      "keywords": ["saas", "dashboard", "analytics", "admin", "operations", "b2b", "reporting"],
+      "trust_posture": "clarity and control",
+      "content_priorities": ["primary workflow", "key metrics", "recent changes", "secondary actions"],
+      "recommended_style_families": ["data-dense-clarity", "minimal-trust"],
+      "recommended_color_moods": ["trust-blue", "neutral-slate"],
+      "recommended_typography_moods": ["system-clarity", "product-sans"],
+      "recommended_motion_posture": "restrained and informative",
+      "recommended_density": "compact",
+      "cta_guidance": "Highlight one workflow-driving action per screen and keep secondary controls quieter.",
+      "anti_patterns": ["decorative gradients that obscure data", "multiple primary actions", "low-contrast charts"]
+    },
+    {
+      "id": "marketing-landing",
+      "display_name": "Marketing Landing Page",
+      "keywords": ["landing", "marketing", "homepage", "hero", "conversion", "campaign", "waitlist"],
+      "trust_posture": "clarity and persuasion",
+      "content_priorities": ["hero value proposition", "proof", "primary CTA", "supporting sections"],
+      "recommended_style_families": ["hero-storytelling", "minimal-trust"],
+      "recommended_color_moods": ["brand-contrast", "warm-conversion"],
+      "recommended_typography_moods": ["editorial-confidence", "product-sans"],
+      "recommended_motion_posture": "purposeful and lightweight",
+      "recommended_density": "comfortable",
+      "cta_guidance": "Anchor the page around one above-the-fold CTA and repeat it after proof sections.",
+      "anti_patterns": ["generic stock-hero layouts", "competing CTA buttons", "animation before clarity"]
+    },
+    {
+      "id": "fintech-product",
+      "display_name": "Fintech Product",
+      "keywords": ["fintech", "banking", "finance", "crypto", "wallet", "payments", "trading"],
+      "trust_posture": "security and confidence",
+      "content_priorities": ["balance or status", "trust signals", "decision-critical actions", "audit trail"],
+      "recommended_style_families": ["minimal-trust", "signal-rich-premium"],
+      "recommended_color_moods": ["trust-blue", "deep-contrast"],
+      "recommended_typography_moods": ["product-sans", "system-clarity"],
+      "recommended_motion_posture": "high-confidence and restrained",
+      "recommended_density": "balanced",
+      "cta_guidance": "Make high-risk actions unmistakable and surround them with trust and confirmation cues.",
+      "anti_patterns": ["playful novelty colors for critical flows", "unclear fee or confirmation copy", "missing security reassurance"]
+    },
+    {
+      "id": "healthcare-service",
+      "display_name": "Healthcare Service",
+      "keywords": ["healthcare", "medical", "clinic", "patient", "wellness", "therapy", "hospital"],
+      "trust_posture": "safety and reassurance",
+      "content_priorities": ["clear next step", "service explanation", "trust proof", "supporting logistics"],
+      "recommended_style_families": ["accessible-calm", "minimal-trust"],
+      "recommended_color_moods": ["calm-care", "trust-blue"],
+      "recommended_typography_moods": ["system-clarity", "humanist-readable"],
+      "recommended_motion_posture": "minimal and calming",
+      "recommended_density": "comfortable",
+      "cta_guidance": "Reduce anxiety with clear labels, predictable forms, and explicit recovery or support options.",
+      "anti_patterns": ["neon urgency colors", "dense jargon blocks", "motion-heavy reassurance patterns"]
+    },
+    {
+      "id": "ecommerce-storefront",
+      "display_name": "E-commerce Storefront",
+      "keywords": ["ecommerce", "e-commerce", "shop", "store", "product", "checkout", "retail"],
+      "trust_posture": "conversion with reassurance",
+      "content_priorities": ["product clarity", "price and trust", "purchase CTA", "proof and support"],
+      "recommended_style_families": ["conversion-showcase", "signal-rich-premium"],
+      "recommended_color_moods": ["warm-conversion", "brand-contrast"],
+      "recommended_typography_moods": ["product-sans", "editorial-confidence"],
+      "recommended_motion_posture": "tactile and supportive",
+      "recommended_density": "balanced",
+      "cta_guidance": "Keep add-to-cart or buy-now dominant while supporting trust with shipping, returns, and proof nearby.",
+      "anti_patterns": ["overcrowded product cards", "buried total cost", "too many promotional distractions at checkout"]
+    },
+    {
+      "id": "portfolio-showcase",
+      "display_name": "Portfolio Showcase",
+      "keywords": ["portfolio", "creative", "agency", "case study", "showcase", "designer", "developer"],
+      "trust_posture": "distinctiveness and credibility",
+      "content_priorities": ["work proof", "author voice", "contact CTA", "selected process"],
+      "recommended_style_families": ["editorial-showcase", "hero-storytelling"],
+      "recommended_color_moods": ["deep-contrast", "brand-contrast"],
+      "recommended_typography_moods": ["editorial-confidence", "expressive-display"],
+      "recommended_motion_posture": "expressive but controlled",
+      "recommended_density": "comfortable",
+      "cta_guidance": "Let the work lead, then place one clean contact or booking action after proof of craft.",
+      "anti_patterns": ["template-looking hero sections", "effects that overshadow the work", "unclear contact path"]
+    },
+    {
+      "id": "education-platform",
+      "display_name": "Education Platform",
+      "keywords": ["education", "learning", "course", "student", "teacher", "classroom", "academy"],
+      "trust_posture": "clarity and encouragement",
+      "content_priorities": ["next learning step", "progress", "content structure", "supporting guidance"],
+      "recommended_style_families": ["accessible-calm", "structured-guidance"],
+      "recommended_color_moods": ["calm-care", "brand-contrast"],
+      "recommended_typography_moods": ["humanist-readable", "system-clarity"],
+      "recommended_motion_posture": "encouraging and minimal",
+      "recommended_density": "balanced",
+      "cta_guidance": "Guide users toward the next lesson or submission step without overcrowding the page.",
+      "anti_patterns": ["over-gamified distraction", "unclear progress states", "content walls without structure"]
+    },
+    {
+      "id": "productivity-tool",
+      "display_name": "Productivity Tool",
+      "keywords": ["productivity", "tasks", "notes", "calendar", "planning", "workspace", "collaboration"],
+      "trust_posture": "speed and reliability",
+      "content_priorities": ["current task", "context", "quick actions", "secondary organization"],
+      "recommended_style_families": ["structured-guidance", "data-dense-clarity"],
+      "recommended_color_moods": ["neutral-slate", "trust-blue"],
+      "recommended_typography_moods": ["system-clarity", "product-sans"],
+      "recommended_motion_posture": "snappy and low-friction",
+      "recommended_density": "compact",
+      "cta_guidance": "Optimize for low-friction completion and visible progress rather than decorative surface area.",
+      "anti_patterns": ["sluggish transitions", "too many competing quick actions", "low-signal empty states"]
+    },
+    {
+      "id": "ai-workspace",
+      "display_name": "AI Workspace",
+      "keywords": ["ai", "assistant", "copilot", "workspace", "agent", "prompt", "automation"],
+      "trust_posture": "confidence with human oversight",
+      "content_priorities": ["current task", "assistant output", "trust and control cues", "history or references"],
+      "recommended_style_families": ["ai-assisted-clarity", "structured-guidance"],
+      "recommended_color_moods": ["neutral-slate", "luminous-product"],
+      "recommended_typography_moods": ["product-sans", "technical-hybrid"],
+      "recommended_motion_posture": "fast and contextual",
+      "recommended_density": "balanced",
+      "cta_guidance": "Keep the next best action visible and make approval, edit, retry, or compare actions explicit.",
+      "anti_patterns": ["magic-looking output without controls", "hidden source context", "novelty chrome around serious work"]
+    },
+    {
+      "id": "developer-tool",
+      "display_name": "Developer Tool",
+      "keywords": ["developer", "engineering", "console", "terminal", "logs", "debug", "observability"],
+      "trust_posture": "precision and speed",
+      "content_priorities": ["active task", "system status", "logs or diffs", "high-signal actions"],
+      "recommended_style_families": ["developer-console-precision", "data-dense-clarity"],
+      "recommended_color_moods": ["neutral-slate", "deep-contrast"],
+      "recommended_typography_moods": ["technical-hybrid", "system-clarity"],
+      "recommended_motion_posture": "minimal and functional",
+      "recommended_density": "compact",
+      "cta_guidance": "Favor explicit commands and state visibility over decorative surfaces or hidden affordances.",
+      "anti_patterns": ["ambiguous destructive actions", "weak status hierarchy", "dense panels without scan paths"]
+    },
+    {
+      "id": "marketplace-platform",
+      "display_name": "Marketplace Platform",
+      "keywords": ["marketplace", "booking", "seller", "buyer", "listing", "inventory", "vendor"],
+      "trust_posture": "decision confidence and fairness",
+      "content_priorities": ["search or discovery", "offer clarity", "trust and proof", "transaction CTA"],
+      "recommended_style_families": ["marketplace-confidence-layers", "conversion-showcase"],
+      "recommended_color_moods": ["marketplace-signal", "trust-blue"],
+      "recommended_typography_moods": ["product-sans", "system-clarity"],
+      "recommended_motion_posture": "supportive and informative",
+      "recommended_density": "balanced",
+      "cta_guidance": "Make fees, availability, seller credibility, and the next transaction step unmistakably clear.",
+      "anti_patterns": ["buried fees", "weak trust proof near decisions", "crowded search results without prioritization"]
+    },
+    {
+      "id": "mobile-companion",
+      "display_name": "Mobile Companion App",
+      "keywords": ["mobile", "app", "iphone", "android", "ios", "habit", "companion"],
+      "trust_posture": "speed, clarity, and continuity",
+      "content_priorities": ["current state", "primary action", "progress or history", "secondary navigation"],
+      "recommended_style_families": ["native-mobile-layering", "structured-guidance"],
+      "recommended_color_moods": ["luminous-product", "calm-care"],
+      "recommended_typography_moods": ["native-readable", "product-sans"],
+      "recommended_motion_posture": "tactile and supportive",
+      "recommended_density": "balanced",
+      "cta_guidance": "Keep one thumb-friendly primary action in reach and preserve context across interruptions.",
+      "anti_patterns": ["desktop patterns squeezed onto mobile", "tap targets without breathing room", "keyboard overlap on primary actions"]
+    }
+  ],
+  "style_families": [
+    {
+      "id": "minimal-trust",
+      "display_name": "Minimal Trust",
+      "keywords": ["minimal", "clean", "professional", "trust", "banking", "saas"],
+      "visual_direction": "Quiet surfaces, strong hierarchy, disciplined spacing, confident CTAs, and restrained accent use.",
+      "best_for": ["fintech", "saas", "healthcare", "b2b"],
+      "motion_posture": "restrained",
+      "density": "balanced",
+      "anti_patterns": ["playful novelty gradients", "multiple saturated accents", "decorative animation on primary tasks"]
+    },
+    {
+      "id": "hero-storytelling",
+      "display_name": "Hero Storytelling",
+      "keywords": ["hero", "story", "launch", "landing", "brand", "marketing"],
+      "visual_direction": "One strong narrative hero, proof-led sections, bold but controlled typography, and directional imagery.",
+      "best_for": ["marketing", "landing", "portfolio", "launch"],
+      "motion_posture": "purposeful",
+      "density": "comfortable",
+      "anti_patterns": ["template hero clichés", "headline without proof", "oversized animation before clarity"]
+    },
+    {
+      "id": "signal-rich-premium",
+      "display_name": "Signal-Rich Premium",
+      "keywords": ["premium", "luxury", "high-end", "ecommerce", "fintech", "brand"],
+      "visual_direction": "Elevated contrast, premium spacing, richer materials, and selective depth without sacrificing readability.",
+      "best_for": ["luxury ecommerce", "premium fintech", "brand refresh"],
+      "motion_posture": "controlled depth",
+      "density": "balanced",
+      "anti_patterns": ["low-opacity text over glass", "luxury tropes without clarity", "ornament that hurts conversion"]
+    },
+    {
+      "id": "accessible-calm",
+      "display_name": "Accessible Calm",
+      "keywords": ["calm", "accessible", "wellness", "health", "education", "clarity"],
+      "visual_direction": "Soft but readable color relationships, generous spacing, low-stress forms, and clear recovery states.",
+      "best_for": ["healthcare", "wellness", "education", "support"],
+      "motion_posture": "minimal",
+      "density": "comfortable",
+      "anti_patterns": ["washed-out contrast", "crowded form groupings", "empty reassurance copy"]
+    },
+    {
+      "id": "conversion-showcase",
+      "display_name": "Conversion Showcase",
+      "keywords": ["conversion", "shop", "product", "sales", "checkout", "proof"],
+      "visual_direction": "Strong CTA hierarchy, proof adjacent to decisions, supportive merchandising, and tactile product emphasis.",
+      "best_for": ["ecommerce", "retail", "conversion flows"],
+      "motion_posture": "tactile",
+      "density": "balanced",
+      "anti_patterns": ["competing promotional badges", "weak checkout CTAs", "unclear pricing hierarchy"]
+    },
+    {
+      "id": "editorial-showcase",
+      "display_name": "Editorial Showcase",
+      "keywords": ["editorial", "creative", "portfolio", "agency", "case study"],
+      "visual_direction": "Expressive typography, disciplined editorial rhythm, and work-first storytelling with controlled contrast.",
+      "best_for": ["portfolio", "creative studios", "thoughtful brand sites"],
+      "motion_posture": "expressive but controlled",
+      "density": "comfortable",
+      "anti_patterns": ["effects that compete with the work", "copy blocks without pacing", "style without narrative clarity"]
+    },
+    {
+      "id": "data-dense-clarity",
+      "display_name": "Data-Dense Clarity",
+      "keywords": ["data", "dashboard", "table", "metrics", "analytics", "dense"],
+      "visual_direction": "Compact but readable layouts, clear grouping, strong contrast, disciplined iconography, and high-signal empty states.",
+      "best_for": ["dashboards", "admin", "ops", "reporting"],
+      "motion_posture": "informative",
+      "density": "compact",
+      "anti_patterns": ["dense without grouping", "ambiguous control states", "too many accent colors per view"]
+    },
+    {
+      "id": "structured-guidance",
+      "display_name": "Structured Guidance",
+      "keywords": ["guided", "workflow", "step", "education", "productivity", "forms"],
+      "visual_direction": "Clear sequencing, visible progress, supportive copy, and predictable action placement across steps.",
+      "best_for": ["wizards", "education", "productivity", "setup flows"],
+      "motion_posture": "supportive",
+      "density": "balanced",
+      "anti_patterns": ["hidden progress", "generic button labels", "re-entering preserved information"]
+    },
+    {
+      "id": "ai-assisted-clarity",
+      "display_name": "AI-Assisted Clarity",
+      "keywords": ["ai", "assistant", "copilot", "workspace", "agent", "automation"],
+      "visual_direction": "Assistant-first layouts with clear task context, grounded trust cues, visible references, and explicit approval or retry actions.",
+      "best_for": ["ai workspaces", "automation tools", "research assistants"],
+      "motion_posture": "fast and contextual",
+      "density": "balanced",
+      "anti_patterns": ["chat bubbles without task structure", "mystery actions", "overly playful chrome around serious output"]
+    },
+    {
+      "id": "developer-console-precision",
+      "display_name": "Developer Console Precision",
+      "keywords": ["developer", "console", "terminal", "observability", "logs", "debug"],
+      "visual_direction": "High-contrast information planes, fast scan paths, strong status semantics, and decisive action styling without clutter.",
+      "best_for": ["developer tooling", "ops consoles", "observability products"],
+      "motion_posture": "minimal",
+      "density": "compact",
+      "anti_patterns": ["status by color alone", "weak hierarchy in dense panes", "unlabeled destructive actions"]
+    },
+    {
+      "id": "marketplace-confidence-layers",
+      "display_name": "Marketplace Confidence Layers",
+      "keywords": ["marketplace", "listing", "discovery", "booking", "seller", "buyer"],
+      "visual_direction": "Discovery-first layouts that layer comparison data, trust proof, pricing clarity, and clear transaction progress.",
+      "best_for": ["marketplaces", "booking flows", "catalog-driven platforms"],
+      "motion_posture": "supportive",
+      "density": "balanced",
+      "anti_patterns": ["flat cards without differentiation", "fees hidden until late", "weak comparison signals"]
+    },
+    {
+      "id": "native-mobile-layering",
+      "display_name": "Native Mobile Layering",
+      "keywords": ["mobile", "native", "ios", "android", "flutter", "react native"],
+      "visual_direction": "Thumb-friendly layering, strong section grouping, clear bottom actions, and motion that reinforces transitions without noise.",
+      "best_for": ["mobile apps", "consumer flows", "habit and companion products"],
+      "motion_posture": "tactile",
+      "density": "balanced",
+      "anti_patterns": ["desktop spacing on small screens", "floating actions that fight the keyboard", "unclear swipe or back behavior"]
+    }
+  ],
+  "color_moods": [
+    {
+      "id": "trust-blue",
+      "display_name": "Trust Blue",
+      "keywords": ["blue", "trust", "finance", "saas", "health"],
+      "palette_direction": "Deep or mid blues with neutral support, calm accents, and strong text contrast.",
+      "best_for": ["fintech", "saas", "healthcare"],
+      "avoid_for": ["high-energy youth brands without supporting accents"]
+    },
+    {
+      "id": "neutral-slate",
+      "display_name": "Neutral Slate",
+      "keywords": ["neutral", "slate", "professional", "dashboard", "b2b"],
+      "palette_direction": "Layered neutrals with one disciplined accent for hierarchy and state signaling.",
+      "best_for": ["dashboards", "productivity", "b2b tools"],
+      "avoid_for": ["brands that require expressive emotional warmth as the primary cue"]
+    },
+    {
+      "id": "brand-contrast",
+      "display_name": "Brand Contrast",
+      "keywords": ["brand", "contrast", "marketing", "landing", "portfolio"],
+      "palette_direction": "Confident brand primary paired with grounded neutrals and one supporting accent.",
+      "best_for": ["marketing", "brand-led products", "portfolio"],
+      "avoid_for": ["high-risk flows that need lower stimulation by default"]
+    },
+    {
+      "id": "warm-conversion",
+      "display_name": "Warm Conversion",
+      "keywords": ["warm", "conversion", "ecommerce", "shop", "retail"],
+      "palette_direction": "Warm primary and supportive accent colors balanced by clean neutral backgrounds.",
+      "best_for": ["ecommerce", "service landing pages", "retail"],
+      "avoid_for": ["regulated flows that need a more institutional trust signal"]
+    },
+    {
+      "id": "calm-care",
+      "display_name": "Calm Care",
+      "keywords": ["calm", "care", "wellness", "health", "education"],
+      "palette_direction": "Soft but readable greens, blues, and warm neutrals with strong accessible text pairing.",
+      "best_for": ["healthcare", "wellness", "education"],
+      "avoid_for": ["high-adrenaline entertainment products"]
+    },
+    {
+      "id": "deep-contrast",
+      "display_name": "Deep Contrast",
+      "keywords": ["dark", "deep", "contrast", "premium", "portfolio"],
+      "palette_direction": "Deep backgrounds or anchors with bright but controlled highlights and strong content contrast.",
+      "best_for": ["premium products", "creative portfolios", "dark-mode friendly systems"],
+      "avoid_for": ["flows where low-light styling harms readability or trust"]
+    },
+    {
+      "id": "luminous-product",
+      "display_name": "Luminous Product",
+      "keywords": ["luminous", "ai", "mobile", "assistant", "modern", "app"],
+      "palette_direction": "Neutral foundations with one luminous accent and disciplined status colors that stay readable in both light and dark modes.",
+      "best_for": ["ai products", "mobile apps", "modern productivity tools"],
+      "avoid_for": ["interfaces where glow-like treatments replace true hierarchy or contrast"]
+    },
+    {
+      "id": "marketplace-signal",
+      "display_name": "Marketplace Signal",
+      "keywords": ["marketplace", "listing", "booking", "comparison", "trust"],
+      "palette_direction": "Grounded neutrals with a confident action color and a separate proof or reassurance accent for comparisons and transactions.",
+      "best_for": ["marketplaces", "booking", "catalog comparison flows"],
+      "avoid_for": ["single-brand storytelling pages that do not need layered decision cues"]
+    }
+  ],
+  "typography_moods": [
+    {
+      "id": "system-clarity",
+      "display_name": "System Clarity",
+      "keywords": ["clear", "system", "readable", "dashboard", "health", "b2b"],
+      "direction": "Neutral, highly readable UI typography with clear hierarchy and efficient scanning.",
+      "best_for": ["dashboards", "forms", "healthcare", "productivity"]
+    },
+    {
+      "id": "product-sans",
+      "display_name": "Product Sans",
+      "keywords": ["product", "modern", "clean", "saas", "fintech"],
+      "direction": "Modern sans hierarchy with confident headings and clean body copy for product interfaces.",
+      "best_for": ["saas", "fintech", "marketing tech"]
+    },
+    {
+      "id": "editorial-confidence",
+      "display_name": "Editorial Confidence",
+      "keywords": ["editorial", "premium", "portfolio", "brand", "story"],
+      "direction": "Stronger display moments paired with restrained body text to create narrative and distinction.",
+      "best_for": ["brand sites", "portfolio", "premium landing pages"]
+    },
+    {
+      "id": "humanist-readable",
+      "display_name": "Humanist Readable",
+      "keywords": ["humanist", "friendly", "education", "health", "support"],
+      "direction": "Warm, approachable typography with high legibility and gentle tone.",
+      "best_for": ["education", "support flows", "wellness", "healthcare"]
+    },
+    {
+      "id": "expressive-display",
+      "display_name": "Expressive Display",
+      "keywords": ["expressive", "creative", "display", "portfolio", "agency"],
+      "direction": "Distinctive display typography used selectively, grounded by simpler supporting text.",
+      "best_for": ["creative portfolios", "agency sites", "campaign pages"]
+    },
+    {
+      "id": "technical-hybrid",
+      "display_name": "Technical Hybrid",
+      "keywords": ["technical", "developer", "console", "ai", "workspace", "precision"],
+      "direction": "Readable sans foundations with selective mono or tabular treatments for system signals, prompts, and structured data.",
+      "best_for": ["developer tools", "ai workspaces", "ops interfaces"]
+    },
+    {
+      "id": "native-readable",
+      "display_name": "Native Readable",
+      "keywords": ["native", "mobile", "ios", "android", "app", "flutter"],
+      "direction": "Mobile-friendly hierarchy with strong tap-target readability, compact labels, and calm body copy for scanning on the move.",
+      "best_for": ["mobile apps", "consumer utilities", "guided companion flows"]
+    }
+  ],
+  "stack_profiles": [
+    {
+      "id": "nextjs-app-router",
+      "display_name": "Next.js App Router",
+      "keywords": ["nextjs", "next", "vercel", "react", "app router"],
+      "aliases": ["nextjs", "next.js", "next"],
+      "preferred_style_families": ["minimal-trust", "ai-assisted-clarity", "conversion-showcase"],
+      "preferred_color_moods": ["neutral-slate", "brand-contrast", "trust-blue"],
+      "preferred_typography_moods": ["product-sans", "system-clarity"],
+      "guidance": [
+        "Favor server-friendly information architecture and ship one strong default state before layering richer transitions.",
+        "Keep suspense, loading, and empty states visually aligned so streaming or partial data never feels broken."
+      ],
+      "component_preview_tools": ["Storybook", "Ladle"],
+      "validation_checks": [
+        "Verify loading, empty, and error states with realistic server latency or partial-data scenarios.",
+        "Check desktop and narrow-width layouts for sticky headers, CTA overlap, and hydration-safe visual continuity."
+      ]
+    },
+    {
+      "id": "react-product",
+      "display_name": "React Product Interface",
+      "keywords": ["react", "spa", "frontend", "product", "dashboard"],
+      "aliases": ["react", "spa"],
+      "preferred_style_families": ["data-dense-clarity", "structured-guidance", "ai-assisted-clarity"],
+      "preferred_color_moods": ["neutral-slate", "trust-blue"],
+      "preferred_typography_moods": ["product-sans", "system-clarity"],
+      "guidance": [
+        "Keep component states explicit and composable so screens stay coherent as local state changes.",
+        "Use design tokens or shared primitives for spacing, icon sizing, and state styling before adding visual variation."
+      ],
+      "component_preview_tools": ["Storybook"],
+      "validation_checks": [
+        "Exercise component states in isolation before validating the integrated page.",
+        "Check focus handling and keyboard navigation across dialogs, drawers, and inline actions."
+      ]
+    },
+    {
+      "id": "flutter-mobile",
+      "display_name": "Flutter Mobile",
+      "keywords": ["flutter", "dart", "android", "ios", "mobile"],
+      "aliases": ["flutter", "dart"],
+      "preferred_style_families": ["native-mobile-layering", "structured-guidance"],
+      "preferred_color_moods": ["luminous-product", "calm-care"],
+      "preferred_typography_moods": ["native-readable", "product-sans"],
+      "guidance": [
+        "Respect platform-safe areas, bottom sheets, keyboard behavior, and thumb reach before adding decorative chrome.",
+        "Use motion to reinforce navigation and state change, not to simulate desktop-style hover richness."
+      ],
+      "component_preview_tools": ["Widgetbook"],
+      "validation_checks": [
+        "Verify bottom-navigation, keyboard, and sticky primary actions on small screens and tall-form flows.",
+        "Check light and dark theme readability on real-device density, not just emulator scaling."
+      ]
+    },
+    {
+      "id": "react-native-mobile",
+      "display_name": "React Native Mobile",
+      "keywords": ["react native", "expo", "mobile", "ios", "android"],
+      "aliases": ["react-native", "react native", "expo"],
+      "preferred_style_families": ["native-mobile-layering", "ai-assisted-clarity"],
+      "preferred_color_moods": ["luminous-product", "trust-blue"],
+      "preferred_typography_moods": ["native-readable", "product-sans"],
+      "guidance": [
+        "Keep navigation transitions and list performance predictable before adding visual flourish.",
+        "Design around touch, pull-to-refresh, and interrupted session recovery rather than desktop interaction assumptions."
+      ],
+      "component_preview_tools": ["Storybook"],
+      "validation_checks": [
+        "Check safe areas, modal stacking, and gesture conflicts on both compact and tall screens.",
+        "Exercise offline or slow-network states so refresh patterns and retry messaging stay clear."
+      ]
+    },
+    {
+      "id": "vue-nuxt-content",
+      "display_name": "Vue or Nuxt Content Product",
+      "keywords": ["vue", "nuxt", "content", "marketing", "product"],
+      "aliases": ["vue", "nuxt", "nuxtjs"],
+      "preferred_style_families": ["hero-storytelling", "marketplace-confidence-layers", "minimal-trust"],
+      "preferred_color_moods": ["brand-contrast", "marketplace-signal", "trust-blue"],
+      "preferred_typography_moods": ["editorial-confidence", "product-sans"],
+      "guidance": [
+        "Use content rhythm and section hierarchy to keep long-form product pages from collapsing into generic blocks.",
+        "Favor clear content modules and reusable section logic so brand polish does not fragment across pages."
+      ],
+      "component_preview_tools": ["Histoire", "Storybook"],
+      "validation_checks": [
+        "Review long-form page pacing, CTA spacing, and section contrast at both desktop and tablet widths.",
+        "Check component-preview parity so marketing sections and product surfaces share the same token language."
+      ]
+    }
+  ]
+}

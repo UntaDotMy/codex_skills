@@ -258,6 +258,42 @@ validate_codex_skill_dir() {
                 return 1
             fi
             ;;
+        ui-design-systems-and-responsive-interfaces)
+            if ! grep -q "## Design Intelligence Packet" "$skill_dir/SKILL.md" || ! grep -q "## Brownfield Redesign Defaults" "$skill_dir/SKILL.md" || ! grep -q "Storybook, Ladle, or Histoire" "$skill_dir/SKILL.md"; then
+                print_error "UI skill is missing design-intelligence, brownfield, or component-verification defaults"
+                return 1
+            fi
+            if ! grep -q "## Professional Polish Checks" "$skill_dir/SKILL.md" || ! grep -q "No emoji as product UI icons" "$skill_dir/SKILL.md"; then
+                print_error "UI skill is missing professional-polish delivery checks"
+                return 1
+            fi
+            if [[ ! -f "$skill_dir/scripts/design_intelligence.py" ]] || [[ ! -f "$skill_dir/data/design_intelligence_catalog.json" ]]; then
+                print_error "UI skill is missing the local design-intelligence generator or catalog"
+                return 1
+            fi
+            if [[ ! -f "$skill_dir/references/55-design-intelligence-brownfield-and-component-verification.md" ]] || ! grep -q "55-design-intelligence-brownfield-and-component-verification.md" "$skill_dir/references/00-ui-knowledge-map.md"; then
+                print_error "UI skill references are missing the design-intelligence brownfield reference wiring"
+                return 1
+            fi
+            if [[ ! -f "$skill_dir/references/57-codex-design-intelligence-generator.md" ]] || ! grep -q "57-codex-design-intelligence-generator.md" "$skill_dir/references/00-ui-knowledge-map.md"; then
+                print_error "UI skill references are missing the Codex design-intelligence generator wiring"
+                return 1
+            fi
+            ;;
+        ux-research-and-experience-strategy)
+            if ! grep -q "## Experience Brief Defaults" "$skill_dir/SKILL.md" || ! grep -q "## Brownfield Redesign and Artifact Persistence" "$skill_dir/SKILL.md" || ! grep -q "Storybook, Ladle, Histoire" "$skill_dir/SKILL.md"; then
+                print_error "UX skill is missing experience-brief, brownfield, or validation-loop defaults"
+                return 1
+            fi
+            if ! grep -q "## Decision Confidence and Recovery Checks" "$skill_dir/SKILL.md" || ! grep -q "Errors preserve progress" "$skill_dir/SKILL.md"; then
+                print_error "UX skill is missing decision-confidence or recovery checks"
+                return 1
+            fi
+            if [[ ! -f "$skill_dir/references/55-experience-briefs-brownfield-and-validation-loops.md" ]] || ! grep -q "55-experience-briefs-brownfield-and-validation-loops.md" "$skill_dir/references/00-ux-knowledge-map.md"; then
+                print_error "UX skill references are missing the experience-brief brownfield reference wiring"
+                return 1
+            fi
+            ;;
     esac
 
     # Enforce separation: Codex skills should not reference legacy external-vendor docs.
@@ -341,8 +377,23 @@ validate_codex_agent_config() {
         return 1
     fi
 
+    if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && { ! grep -q "design intelligence packet" "$config_file" || ! grep -q "Storybook, Ladle, or Histoire" "$config_file" || ! grep -q "master plus page-override pattern" "$config_file"; }; then
+        print_error "UI skill prompt must require design-intelligence packets, brownfield-safe persistence, and component-story verification: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && ! grep -q 'scripts/design_intelligence.py' "$config_file"; then
+        print_error "UI skill prompt must point to the local design-intelligence generator: $skill_name"
+        return 1
+    fi
+
     if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && ! grep -q "Start by hardening the request into a crisp product brief" "$config_file"; then
         print_error "UX skill prompt must require crisp product-brief hardening: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && { ! grep -q "Build an experience brief" "$config_file" || ! grep -q "safe fallback slugs" "$config_file" || ! grep -q "Storybook, Ladle, Histoire" "$config_file"; }; then
+        print_error "UX skill prompt must require experience briefs, safe persistence, and component-preview validation loops: $skill_name"
         return 1
     fi
 
@@ -729,6 +780,12 @@ sync_codex() {
         if [[ -d "$skill_dir/scripts" ]]; then
             mkdir -p "$CODEX_TARGET/skills/$skill_name/scripts"
             cp -r "$skill_dir/scripts/." "$CODEX_TARGET/skills/$skill_name/scripts/"
+        fi
+
+        # Copy data directory if exists
+        if [[ -d "$skill_dir/data" ]]; then
+            mkdir -p "$CODEX_TARGET/skills/$skill_name/data"
+            cp -r "$skill_dir/data/." "$CODEX_TARGET/skills/$skill_name/data/"
         fi
 
         # Copy agents configuration if exists (Codex CLI uses agents/openai.yaml)

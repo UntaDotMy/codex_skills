@@ -60,6 +60,34 @@ Located in root directories (12 skill directories total).
 ./sync-skills.sh status
 ```
 
+### Use the UI Design-Intelligence Generator
+
+After sync, you can generate a local design packet directly from the skill pack:
+
+```bash
+python3 ~/.codex/skills/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "fintech banking dashboard with secure transfers"
+```
+
+Make the recommendation match your real stack and component system:
+
+```bash
+python3 ~/.codex/skills/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py \
+  "AI workspace for research copilots" \
+  --stack nextjs \
+  --component-library shadcn \
+  --format json
+```
+
+Persist a reusable design system safely:
+
+```bash
+python3 ~/.codex/skills/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py \
+  "ecommerce checkout optimization" \
+  --persist \
+  --project-name "Storefront Revamp" \
+  --page "Checkout Flow"
+```
+
 The sync does all of the following:
 
 - copies root skills into `~/.codex/skills/`
