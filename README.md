@@ -59,6 +59,31 @@ Located in root directories (12 skill directories total).
 ./sync-skills.sh status
 ```
 
+### Copy-Paste Prompt for Codex
+
+If you want another Codex session to install this for you, copy this prompt and paste it into Codex from the repository root:
+
+```text
+Please install and sync this Codex skill pack for me.
+
+Working brief:
+- Goal: install this repository into my Codex home using the repo-managed installer flow.
+- Constraints: use the existing `./sync-skills.sh` script only; do not create new shell scripts; keep changes surgical; respect the current platform path detection or `CODEX_TARGET_OVERRIDE` if I provide it.
+- Required flow:
+  1. Read `README.md` and `AGENTS.md` first.
+  2. Run `bash ./sync-skills.sh validate`.
+  3. Run `bash ./sync-skills.sh install`.
+  4. Run `bash ./sync-skills.sh status`.
+  5. Report whether repo version, installed version, memory-status-reporter wiring, agent inheritance, and MD5 verification all pass.
+- Expected result: the skill pack is installed into Codex home, checksums match, and the final report clearly says whether the install is complete or partial.
+
+If the install fails:
+- identify the exact failing step,
+- fix only the root cause,
+- rerun the minimum necessary validation,
+- then rerun `install` and `status`.
+```
+
 ### Interactive Manager
 
 Use the same script in interactive mode when you want install, sync, update, remove, verify, and status in one menu:
