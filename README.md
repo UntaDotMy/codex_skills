@@ -2,6 +2,82 @@
 
 This repository is a Codex-first skill pack for OpenAI Codex CLI. It ships specialist skills, repo-wide orchestration guidance, sync tooling for `~/.codex`, and a memory-status workflow that turns saved artifacts into human-style learning reports.
 
+## Quick Start
+
+### AI-Assisted Install
+
+If you want Codex to install this for you, copy and paste this prompt into a Codex session:
+
+```text
+Please install this Codex skill pack for me from GitHub and finish the setup.
+
+Working brief:
+- Goal: clone the repository, install the skill pack into Codex home, verify the install, and tell me whether everything is fully working.
+- Repository: https://github.com/UntaDotMy/codex_skills.git
+- Constraints: use the existing `sync-skills.sh` script only; do not create new shell scripts; keep changes surgical; respect the current platform path detection or `CODEX_TARGET_OVERRIDE` if I provide it.
+
+Required flow:
+1. Clone the repo with `git clone https://github.com/UntaDotMy/codex_skills.git` if it is not already present.
+2. Change into the repository root.
+3. Read `README.md` and `AGENTS.md` first.
+4. Run `bash ./sync-skills.sh validate`.
+5. Run `bash ./sync-skills.sh install`.
+6. Run `bash ./sync-skills.sh status`.
+7. Tell me whether repo version, installed version, memory-status-reporter wiring, agent inheritance, and MD5 verification all pass.
+
+If anything fails:
+- identify the exact failing step,
+- fix only the root cause,
+- rerun the minimum necessary validation,
+- then rerun `install` and `status`.
+```
+
+### Manual Install
+
+```bash
+git clone https://github.com/UntaDotMy/codex_skills.git
+cd codex_skills
+bash ./sync-skills.sh validate
+bash ./sync-skills.sh install
+bash ./sync-skills.sh status
+```
+
+### Start Using It
+
+After installation, you can immediately use the manager and verification flow:
+
+```bash
+bash ./sync-skills.sh menu
+bash ./sync-skills.sh verify
+bash ./sync-skills.sh status
+```
+
+### Requirements
+
+- Codex CLI with `js_repl`, `memories`, and `multi_agent` enabled
+- Python 3 for memory-report tooling and sync helpers
+- Git Bash on Windows if you want to run `sync-skills.sh` directly
+
+## Setup Reference
+
+### Interactive Manager
+
+Use the same script in interactive mode when you want install, sync, update, remove, verify, and status in one menu:
+
+```bash
+./sync-skills.sh menu
+```
+
+The interactive manager now handles all of the following in one place:
+
+- install the full repo-managed skill pack
+- force-sync the skill pack
+- detect drift with MD5 and only update when needed
+- remove one installed skill or the full repo-managed pack
+- verify copied files with MD5 checksums
+- detect repo and installed versions
+- detect stale or old installed files before refresh
+
 ## Directory Structure
 
 ```text
@@ -43,64 +119,6 @@ Located in root directories (12 skill directories total).
 10. **ux-research-and-experience-strategy** - UX framing, jobs-to-be-done, usability strategy
 11. **git-expert** - Repository-state safety, branching, recovery, review handoff
 12. **memory-status-reporter** - Daily learnings, mistake ledgers, tool-mistake tracking, and heuristic memory-health reporting
-
-## Setup
-
-### Requirements
-
-- Codex CLI with `js_repl`, `memories`, and `multi_agent` enabled
-- Python 3 for memory-report tooling and sync helpers
-- Git Bash on Windows if you want to run `sync-skills.sh` directly
-
-### Install the Skill Pack
-
-```bash
-./sync-skills.sh install
-./sync-skills.sh status
-```
-
-### Copy-Paste Prompt for Codex
-
-If you want another Codex session to install this for you, copy this prompt and paste it into Codex from the repository root:
-
-```text
-Please install and sync this Codex skill pack for me.
-
-Working brief:
-- Goal: install this repository into my Codex home using the repo-managed installer flow.
-- Constraints: use the existing `./sync-skills.sh` script only; do not create new shell scripts; keep changes surgical; respect the current platform path detection or `CODEX_TARGET_OVERRIDE` if I provide it.
-- Required flow:
-  1. Read `README.md` and `AGENTS.md` first.
-  2. Run `bash ./sync-skills.sh validate`.
-  3. Run `bash ./sync-skills.sh install`.
-  4. Run `bash ./sync-skills.sh status`.
-  5. Report whether repo version, installed version, memory-status-reporter wiring, agent inheritance, and MD5 verification all pass.
-- Expected result: the skill pack is installed into Codex home, checksums match, and the final report clearly says whether the install is complete or partial.
-
-If the install fails:
-- identify the exact failing step,
-- fix only the root cause,
-- rerun the minimum necessary validation,
-- then rerun `install` and `status`.
-```
-
-### Interactive Manager
-
-Use the same script in interactive mode when you want install, sync, update, remove, verify, and status in one menu:
-
-```bash
-./sync-skills.sh menu
-```
-
-The interactive manager now handles all of the following in one place:
-
-- install the full repo-managed skill pack
-- force-sync the skill pack
-- detect drift with MD5 and only update when needed
-- remove one installed skill or the full repo-managed pack
-- verify copied files with MD5 checksums
-- detect repo and installed versions
-- detect stale or old installed files before refresh
 
 ### Use the UI Design-Intelligence Generator
 
