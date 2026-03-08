@@ -62,6 +62,11 @@ resolve_windows_home_directory() {
 }
 
 resolve_codex_target_directory() {
+    if [[ -n "${CODEX_TARGET_OVERRIDE:-}" ]]; then
+        printf '%s\n' "$CODEX_TARGET_OVERRIDE"
+        return 0
+    fi
+
     if [[ "$(detect_platform_name)" == "windows" ]]; then
         printf '%s/.codex\n' "$(resolve_windows_home_directory)"
         return 0
@@ -116,6 +121,277 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+skill_manager_state_directory() {
+    printf '%s/.codex-skill-manager\n' "$CODEX_TARGET"
+}
+
+skill_manager_manifest_directory() {
+    printf '%s/manifests\n' "$(skill_manager_state_directory)"
+}
+
+skill_manager_metadata_file() {
+    printf '%s/install-metadata.txt\n' "$(skill_manager_state_directory)"
+}
+
+ensure_skill_manager_state_directories() {
+    mkdir -p "$(skill_manager_manifest_directory)/source"
+    mkdir -p "$(skill_manager_manifest_directory)/target"
+}
+
+get_repo_version() {
+    git -C "$CODEX_SOURCE" rev-parse --short HEAD 2>/dev/null || echo "unknown"
+}
+
+get_installed_version() {
+    local metadata_file
+    metadata_file="$(skill_manager_metadata_file)"
+
+    if [[ -f "$metadata_file" ]]; then
+        awk -F= '/^repo_version=/{print $2}' "$metadata_file"
+        return 0
+    fi
+
+    echo "unknown"
+}
+
+write_install_metadata() {
+    local metadata_file
+    metadata_file="$(skill_manager_metadata_file)"
+
+    ensure_skill_manager_state_directories
+    cat > "$metadata_file" <<EOF
+repo_version=$(get_repo_version)
+updated_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+platform=$PLATFORM_NAME
+target=$CODEX_TARGET
+EOF
+}
+
+SKILL_SYNC_DIRECTORIES=(
+    "references"
+    "scripts"
+    "data"
+    "agents"
+    "templates"
+    "examples"
+    "assets"
+)
+
+md5_for_file() {
+    local file_path=$1
+
+    if command -v md5sum >/dev/null 2>&1; then
+        md5sum "$file_path" | awk '{print tolower($1)}'
+        return 0
+    fi
+
+    if command -v md5 >/dev/null 2>&1; then
+        md5 -q "$file_path" | tr '[:upper:]' '[:lower:]'
+        return 0
+    fi
+
+    if command -v openssl >/dev/null 2>&1; then
+        openssl md5 "$file_path" | awk '{print tolower($NF)}'
+        return 0
+    fi
+
+    if command -v certutil >/dev/null 2>&1; then
+        local certutil_path="$file_path"
+        if command -v cygpath >/dev/null 2>&1; then
+            certutil_path="$(cygpath -w "$file_path")"
+        fi
+        certutil -hashfile "$certutil_path" MD5 | awk 'NR==2 {print tolower($1)}'
+        return 0
+    fi
+
+    print_error "No MD5 checksum tool is available on this system"
+    return 1
+}
+
+build_directory_manifest() {
+    local directory_path=$1
+
+    [[ -d "$directory_path" ]] || return 1
+
+    (
+        cd "$directory_path"
+        while IFS= read -r relative_path; do
+            local normalized_path
+            local checksum
+            normalized_path="${relative_path#./}"
+            checksum="$(md5_for_file "$directory_path/$normalized_path")"
+            printf '%s|%s\n' "$normalized_path" "$checksum"
+        done < <(find . -type f ! -path '*/__pycache__/*' ! -name '*.pyc' ! -name '.DS_Store' | LC_ALL=C sort)
+    )
+}
+
+build_skill_manifest() {
+    local directory_path=$1
+    local relative_directory
+
+    [[ -d "$directory_path" ]] || return 1
+
+    (
+        cd "$directory_path"
+
+        if [[ -f "SKILL.md" ]]; then
+            printf '%s|%s\n' "SKILL.md" "$(md5_for_file "$directory_path/SKILL.md")"
+        fi
+
+        for relative_directory in "${SKILL_SYNC_DIRECTORIES[@]}"; do
+            if [[ -d "$relative_directory" ]]; then
+                while IFS= read -r relative_path; do
+                    local normalized_path
+                    local checksum
+                    normalized_path="${relative_path#./}"
+                    checksum="$(md5_for_file "$directory_path/$normalized_path")"
+                    printf '%s|%s\n' "$normalized_path" "$checksum"
+                done < <(find "$relative_directory" -type f ! -path '*/__pycache__/*' ! -name '*.pyc' ! -name '.DS_Store' | LC_ALL=C sort)
+            fi
+        done | LC_ALL=C sort
+    )
+}
+
+save_manifest_snapshot() {
+    local manifest_kind=$1
+    local manifest_name=$2
+    local manifest_source_path=$3
+
+    ensure_skill_manager_state_directories
+    cp "$manifest_source_path" "$(skill_manager_manifest_directory)/$manifest_kind/$manifest_name.md5"
+}
+
+list_repo_skill_names() {
+    local skill_dir
+    for skill_dir in "$CODEX_SOURCE"/*/; do
+        if [[ -f "$skill_dir/SKILL.md" ]]; then
+            basename "$skill_dir"
+        fi
+    done | LC_ALL=C sort
+}
+
+list_installed_skill_names() {
+    local skill_dir
+
+    [[ -d "$CODEX_TARGET/skills" ]] || return 0
+
+    for skill_dir in "$CODEX_TARGET"/skills/*/; do
+        if [[ -f "$skill_dir/SKILL.md" ]]; then
+            basename "$skill_dir"
+        fi
+    done | LC_ALL=C sort
+}
+
+copy_skill_directory_if_present() {
+    local source_skill_directory=$1
+    local target_skill_directory=$2
+    local relative_directory=$3
+
+    if [[ -d "$source_skill_directory/$relative_directory" ]]; then
+        mkdir -p "$target_skill_directory/$relative_directory"
+        cp -r "$source_skill_directory/$relative_directory/." "$target_skill_directory/$relative_directory/"
+    fi
+}
+
+copy_managed_skill_content() {
+    local source_skill_directory=$1
+    local target_skill_directory=$2
+    local relative_directory
+
+    cp "$source_skill_directory/SKILL.md" "$target_skill_directory/SKILL.md"
+
+    for relative_directory in "${SKILL_SYNC_DIRECTORIES[@]}"; do
+        copy_skill_directory_if_present "$source_skill_directory" "$target_skill_directory" "$relative_directory"
+    done
+}
+
+verify_root_file_checksum() {
+    local relative_path=$1
+    local source_path="$CODEX_SOURCE/$relative_path"
+    local target_path="$CODEX_TARGET/$relative_path"
+    local source_checksum
+    local target_checksum
+
+    if [[ ! -f "$source_path" ]]; then
+        print_error "Source file missing for checksum verification: $source_path"
+        return 1
+    fi
+
+    if [[ ! -f "$target_path" ]]; then
+        print_error "Target file missing for checksum verification: $target_path"
+        return 1
+    fi
+
+    source_checksum="$(md5_for_file "$source_path")"
+    target_checksum="$(md5_for_file "$target_path")"
+
+    if [[ "$source_checksum" != "$target_checksum" ]]; then
+        print_error "Checksum mismatch for $relative_path"
+        return 1
+    fi
+
+    print_success "MD5 verified for $relative_path"
+}
+
+verify_skill_checksum() {
+    local skill_name=$1
+    local source_directory="$CODEX_SOURCE/$skill_name"
+    local target_directory="$CODEX_TARGET/skills/$skill_name"
+    local source_manifest
+    local target_manifest
+
+    if [[ ! -d "$source_directory" ]]; then
+        print_error "Skill does not exist in repo: $skill_name"
+        return 1
+    fi
+
+    if [[ ! -d "$target_directory" ]]; then
+        print_error "Skill is not installed in Codex home: $skill_name"
+        return 1
+    fi
+
+    source_manifest="$(mktemp)"
+    target_manifest="$(mktemp)"
+
+    build_skill_manifest "$source_directory" > "$source_manifest"
+    build_skill_manifest "$target_directory" > "$target_manifest"
+
+    save_manifest_snapshot "source" "$skill_name" "$source_manifest"
+    save_manifest_snapshot "target" "$skill_name" "$target_manifest"
+
+    if diff -u "$source_manifest" "$target_manifest" >/dev/null; then
+        rm -f "$source_manifest" "$target_manifest"
+        print_success "MD5 verified for skill: $skill_name"
+        return 0
+    fi
+
+    print_error "MD5 verification failed for skill: $skill_name"
+    diff -u "$source_manifest" "$target_manifest" || true
+    rm -f "$source_manifest" "$target_manifest"
+    return 1
+}
+
+verify_pack_checksums() {
+    local failed=0
+    local skill_name
+
+    verify_root_file_checksum "AGENTS.md" || failed=1
+    verify_root_file_checksum "00-skill-routing-and-escalation.md" || failed=1
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        verify_skill_checksum "$skill_name" || failed=1
+    done < <(list_repo_skill_names)
+
+    if [[ $failed -eq 0 ]]; then
+        print_success "All MD5 verification checks passed."
+        return 0
+    fi
+
+    print_error "One or more MD5 verification checks failed."
+    return 1
 }
 
 # Function to validate skill file
@@ -767,32 +1043,7 @@ sync_codex() {
         # Create target skill directory (Codex expects skills under ~/.codex/skills/<skill>/)
         mkdir -p "$CODEX_TARGET/skills/$skill_name"
 
-        # Copy SKILL.md
-        cp "$skill_dir/SKILL.md" "$CODEX_TARGET/skills/$skill_name/SKILL.md"
-
-        # Copy references directory if exists
-        if [[ -d "$skill_dir/references" ]]; then
-            mkdir -p "$CODEX_TARGET/skills/$skill_name/references"
-            cp -r "$skill_dir/references/." "$CODEX_TARGET/skills/$skill_name/references/"
-        fi
-
-        # Copy scripts directory if exists
-        if [[ -d "$skill_dir/scripts" ]]; then
-            mkdir -p "$CODEX_TARGET/skills/$skill_name/scripts"
-            cp -r "$skill_dir/scripts/." "$CODEX_TARGET/skills/$skill_name/scripts/"
-        fi
-
-        # Copy data directory if exists
-        if [[ -d "$skill_dir/data" ]]; then
-            mkdir -p "$CODEX_TARGET/skills/$skill_name/data"
-            cp -r "$skill_dir/data/." "$CODEX_TARGET/skills/$skill_name/data/"
-        fi
-
-        # Copy agents configuration if exists (Codex CLI uses agents/openai.yaml)
-        if [[ -d "$skill_dir/agents" ]]; then
-            mkdir -p "$CODEX_TARGET/skills/$skill_name/agents"
-            cp -r "$skill_dir/agents/." "$CODEX_TARGET/skills/$skill_name/agents/"
-        fi
+        copy_managed_skill_content "$skill_dir" "$CODEX_TARGET/skills/$skill_name"
 
         if ! sync_codex_home_agent_from_openai "$skill_name"; then
             print_error "Failed to sync $skill_name home agent config"
@@ -804,6 +1055,13 @@ sync_codex() {
 
     if ! sync_memory_status_reporter_home_wiring; then
         print_error "Failed to sync memory-status-reporter live home wiring"
+        return 1
+    fi
+
+    write_install_metadata
+
+    if ! verify_pack_checksums; then
+        print_error "MD5 verification failed after sync; Codex home may be partial"
         return 1
     fi
 
@@ -838,6 +1096,297 @@ validate_all() {
     fi
 }
 
+skill_needs_update() {
+    local skill_name=$1
+    local source_directory="$CODEX_SOURCE/$skill_name"
+    local target_directory="$CODEX_TARGET/skills/$skill_name"
+    local source_manifest
+    local target_manifest
+
+    if [[ ! -d "$target_directory" ]]; then
+        return 0
+    fi
+
+    source_manifest="$(mktemp)"
+    target_manifest="$(mktemp)"
+
+    build_skill_manifest "$source_directory" > "$source_manifest"
+    build_skill_manifest "$target_directory" > "$target_manifest"
+
+    if diff -u "$source_manifest" "$target_manifest" >/dev/null; then
+        rm -f "$source_manifest" "$target_manifest"
+        return 1
+    fi
+
+    rm -f "$source_manifest" "$target_manifest"
+    return 0
+}
+
+core_files_need_update() {
+    local relative_path
+
+    for relative_path in "AGENTS.md" "00-skill-routing-and-escalation.md"; do
+        local source_path="$CODEX_SOURCE/$relative_path"
+        local target_path="$CODEX_TARGET/$relative_path"
+
+        if [[ ! -f "$target_path" ]]; then
+            return 0
+        fi
+
+        if [[ "$(md5_for_file "$source_path")" != "$(md5_for_file "$target_path")" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+show_checksum_status() {
+    local changed_skills=()
+    local skill_name
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        if skill_needs_update "$skill_name"; then
+            changed_skills+=("$skill_name")
+        fi
+    done < <(list_repo_skill_names)
+
+    if core_files_need_update; then
+        echo "  core file checksum status: drift detected"
+    else
+        echo "  core file checksum status: in sync"
+    fi
+
+    if [[ ${#changed_skills[@]} -eq 0 ]]; then
+        echo "  skill checksum status: all installed skills match source"
+    else
+        echo "  skill checksum status: drift in ${changed_skills[*]}"
+    fi
+}
+
+strip_memory_status_reporter_home_wiring() {
+    local home_config_file="$CODEX_TARGET/config.toml"
+    local routing_line="${MEMORY_STATUS_REQUIRED_CONFIG_LINES[0]}"
+
+    [[ -f "$home_config_file" ]] || return 0
+
+    python3 - "$home_config_file" "$routing_line" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+config_path = Path(sys.argv[1])
+routing_line = sys.argv[2]
+config_text = config_path.read_text(encoding="utf-8")
+config_text = config_text.replace(routing_line + "\n", "")
+config_text = config_text.replace("\n" + routing_line, "")
+config_text = re.sub(r"(?ms)^\[agents\.memory-status-reporter\]\n.*?(?=^\[|\Z)", "", config_text)
+config_text = re.sub(r"\n{3,}", "\n\n", config_text).strip() + "\n"
+config_path.write_text(config_text, encoding="utf-8")
+PY
+}
+
+remove_skill_installation() {
+    local skill_name=$1
+
+    if [[ -d "$CODEX_TARGET/skills/$skill_name" ]]; then
+        rm -rf "$CODEX_TARGET/skills/$skill_name"
+    fi
+
+    if [[ -f "$CODEX_TARGET/agents/$skill_name.toml" ]]; then
+        rm -f "$CODEX_TARGET/agents/$skill_name.toml"
+    fi
+
+    rm -f "$(skill_manager_manifest_directory)/source/$skill_name.md5" 2>/dev/null || true
+    rm -f "$(skill_manager_manifest_directory)/target/$skill_name.md5" 2>/dev/null || true
+
+    if [[ "$skill_name" == "memory-status-reporter" ]]; then
+        strip_memory_status_reporter_home_wiring
+    fi
+
+    if [[ -d "$CODEX_TARGET/skills/$skill_name" ]] || [[ -f "$CODEX_TARGET/agents/$skill_name.toml" ]]; then
+        print_error "Failed to remove skill: $skill_name"
+        return 1
+    fi
+
+    print_success "Removed skill from Codex home: $skill_name"
+}
+
+remove_skill_pack() {
+    local skill_name
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        remove_skill_installation "$skill_name"
+    done < <(list_repo_skill_names)
+
+    rm -f "$CODEX_TARGET/AGENTS.md"
+    rm -f "$CODEX_TARGET/00-skill-routing-and-escalation.md"
+    rm -rf "$(skill_manager_state_directory)" 2>/dev/null || true
+
+    if [[ -f "$CODEX_TARGET/AGENTS.md" ]] || [[ -f "$CODEX_TARGET/00-skill-routing-and-escalation.md" ]]; then
+        print_error "Failed to remove one or more core repo-managed Codex files"
+        return 1
+    fi
+
+    print_success "Removed repo-managed Codex skill pack files from $CODEX_TARGET"
+}
+
+install_codex() {
+    print_info "Installing Codex skill pack into $CODEX_TARGET"
+    validate_all
+    sync_codex
+}
+
+update_codex() {
+    local changed_skills=()
+    local skill_name
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        if skill_needs_update "$skill_name"; then
+            changed_skills+=("$skill_name")
+        fi
+    done < <(list_repo_skill_names)
+
+    if ! core_files_need_update && [[ ${#changed_skills[@]} -eq 0 ]]; then
+        print_success "Installed skill pack is already up to date."
+        verify_pack_checksums
+        return 0
+    fi
+
+    print_info "Repo version: $(get_repo_version)"
+    print_info "Installed version: $(get_installed_version)"
+    if [[ ${#changed_skills[@]} -gt 0 ]]; then
+        print_info "Changed skills detected: ${changed_skills[*]}"
+    else
+        print_info "Core Codex home files changed; refreshing the installed skill pack."
+    fi
+
+    sync_codex
+}
+
+choose_installed_skill_interactively() {
+    local installed_skills=()
+    local selected_skill
+
+    mapfile -t installed_skills < <(list_installed_skill_names)
+    if [[ ${#installed_skills[@]} -eq 0 ]]; then
+        print_warning "No installed skills were found in $CODEX_TARGET/skills"
+        return 1
+    fi
+
+    print_info "Select an installed skill:"
+    select selected_skill in "${installed_skills[@]}" "Cancel"; do
+        if [[ "$selected_skill" == "Cancel" ]]; then
+            return 1
+        fi
+        if [[ -n "$selected_skill" ]]; then
+            printf '%s\n' "$selected_skill"
+            return 0
+        fi
+        print_warning "Choose a valid option."
+    done
+}
+
+prompt_yes_no() {
+    local prompt_message=$1
+    local default_answer=${2:-Y}
+    local user_input
+
+    read -r -p "$prompt_message [$default_answer/n]: " user_input
+    user_input="${user_input:-$default_answer}"
+    [[ "$user_input" =~ ^[Yy]$ ]]
+}
+
+run_interactive_menu() {
+    local menu_choice
+    local selected_skill
+    local remove_mode
+    local verify_mode
+
+    while true; do
+        echo ""
+        print_info "Codex Skill Manager"
+        echo "  1) Install skill pack"
+        echo "  2) Sync skill pack"
+        echo "  3) Update installed skill pack"
+        echo "  4) Remove installed skills"
+        echo "  5) Verify MD5 checksums"
+        echo "  6) Show status"
+        echo "  7) Exit"
+        echo ""
+        read -r -p "Choose an option: " menu_choice
+
+        case "$menu_choice" in
+            1)
+                if prompt_yes_no "Install the repo skill pack into $CODEX_TARGET?"; then
+                    install_codex
+                fi
+                ;;
+            2)
+                if prompt_yes_no "Force-sync the repo skill pack into $CODEX_TARGET?"; then
+                    sync_codex
+                fi
+                ;;
+            3)
+                update_codex
+                ;;
+            4)
+                echo "  1) Remove one installed skill"
+                echo "  2) Remove the full repo-managed skill pack"
+                echo "  3) Cancel"
+                read -r -p "Choose an option: " remove_mode
+                case "$remove_mode" in
+                    1)
+                        selected_skill="$(choose_installed_skill_interactively)" || continue
+                        if prompt_yes_no "Remove $selected_skill from $CODEX_TARGET?"; then
+                            remove_skill_installation "$selected_skill"
+                        fi
+                        ;;
+                    2)
+                        if prompt_yes_no "Remove the full repo-managed skill pack from $CODEX_TARGET?" "n"; then
+                            remove_skill_pack
+                        fi
+                        ;;
+                    *)
+                        print_info "Remove cancelled."
+                        ;;
+                esac
+                ;;
+            5)
+                echo "  1) Verify the full installed skill pack"
+                echo "  2) Verify one installed skill"
+                echo "  3) Cancel"
+                read -r -p "Choose an option: " verify_mode
+                case "$verify_mode" in
+                    1)
+                        verify_pack_checksums
+                        ;;
+                    2)
+                        selected_skill="$(choose_installed_skill_interactively)" || continue
+                        verify_skill_checksum "$selected_skill"
+                        ;;
+                    *)
+                        print_info "Verification cancelled."
+                        ;;
+                esac
+                ;;
+            6)
+                show_status
+                ;;
+            7)
+                print_success "Goodbye."
+                return 0
+                ;;
+            *)
+                print_warning "Choose a valid option."
+                ;;
+        esac
+    done
+}
+
 # Function to show status
 show_status() {
     print_info "Skill Sync Status"
@@ -847,6 +1396,8 @@ show_status() {
     echo "  Source: $CODEX_SOURCE"
     echo "  Target: $CODEX_TARGET/skills"
     echo "  Platform: $PLATFORM_NAME"
+    echo "  Repo version: $(get_repo_version)"
+    echo "  Installed version: $(get_installed_version)"
 
     local codex_source_count=0
     local codex_synced_count=0
@@ -897,18 +1448,69 @@ show_status() {
     else
         echo "  agent inheritance: 0/0"
     fi
+
+    echo ""
+    print_info "MD5 Verification:"
+    show_checksum_status
     echo ""
 }
 
 # Main script
+show_usage() {
+    echo "Usage: $0 {menu|install|sync|codex|update|remove|verify|validate|status|all}"
+    echo ""
+    echo "Commands:"
+    echo "  menu              - Open the interactive installer and management menu"
+    echo "  install           - Validate, sync, version-stamp, and MD5-verify the skill pack"
+    echo "  sync              - Alias for codex; force-sync and MD5-verify the skill pack"
+    echo "  codex             - Sync Codex skills only, then MD5-verify the result"
+    echo "  update            - Detect drift with MD5, sync only when needed, then verify"
+    echo "  remove            - Remove the full repo-managed skill pack"
+    echo "  remove <skill>    - Remove one installed skill by name"
+    echo "  verify            - Verify the installed skill pack with MD5 checksums"
+    echo "  verify <skill>    - Verify one installed skill with MD5 checksums"
+    echo "  validate          - Validate all skills without syncing"
+    echo "  status            - Show sync status, versions, and checksum drift"
+    echo "  all               - Validate and sync Codex (default)"
+    echo ""
+    echo "Environment:"
+    echo "  CODEX_TARGET_OVERRIDE=/custom/path/.codex  Override the Codex home target"
+}
+
 main() {
     echo ""
     print_info "Codex Skills Sync and Validation"
     echo ""
 
     case "${1:-}" in
+        menu)
+            run_interactive_menu
+            ;;
+        install)
+            install_codex
+            ;;
+        sync)
+            sync_codex
+            ;;
         codex)
             sync_codex
+            ;;
+        update)
+            update_codex
+            ;;
+        remove)
+            if [[ -n "${2:-}" ]]; then
+                remove_skill_installation "$2"
+            else
+                remove_skill_pack
+            fi
+            ;;
+        verify)
+            if [[ -n "${2:-}" ]]; then
+                verify_skill_checksum "$2"
+            else
+                verify_pack_checksums
+            fi
             ;;
         validate)
             validate_all
@@ -926,13 +1528,7 @@ main() {
             fi
             ;;
         *)
-            echo "Usage: $0 {codex|validate|status|all}"
-            echo ""
-            echo "Commands:"
-            echo "  codex     - Sync Codex skills only"
-            echo "  validate  - Validate all skills without syncing"
-            echo "  status    - Show sync status"
-            echo "  all       - Validate and sync Codex (default)"
+            show_usage
             exit 1
             ;;
     esac

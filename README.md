@@ -55,10 +55,27 @@ Located in root directories (12 skill directories total).
 ### Install the Skill Pack
 
 ```bash
-./sync-skills.sh validate
-./sync-skills.sh codex
+./sync-skills.sh install
 ./sync-skills.sh status
 ```
+
+### Interactive Manager
+
+Use the same script in interactive mode when you want install, sync, update, remove, verify, and status in one menu:
+
+```bash
+./sync-skills.sh menu
+```
+
+The interactive manager now handles all of the following in one place:
+
+- install the full repo-managed skill pack
+- force-sync the skill pack
+- detect drift with MD5 and only update when needed
+- remove one installed skill or the full repo-managed pack
+- verify copied files with MD5 checksums
+- detect repo and installed versions
+- detect stale or old installed files before refresh
 
 ### Use the UI Design-Intelligence Generator
 
@@ -94,6 +111,9 @@ The sync does all of the following:
 - copies `AGENTS.md` and `00-skill-routing-and-escalation.md` into `~/.codex/`
 - refreshes `~/.codex/agents/*.toml` from each root `agents/openai.yaml`
 - keeps `~/.codex/config.toml` wired for `memory-status-reporter`
+- writes install metadata with the current repo version
+- compares source and installed files with MD5 checksums after sync
+- verifies the managed install surface only: `SKILL.md`, `references/`, `scripts/`, `data/`, `agents/`, `templates/`, `examples/`, and `assets/`
 - injects shared execution-policy lines for working briefs, context efficiency, modular structure, surgical patches, and compact learning snapshots
 
 ### macOS and Linux
@@ -184,9 +204,15 @@ python3 ~/.codex/skills/memory-status-reporter/scripts/memory_status_report.py -
 ### Update Skills
 
 ```bash
-./sync-skills.sh validate
-./sync-skills.sh codex
+./sync-skills.sh update
+./sync-skills.sh verify
 ./sync-skills.sh status
+```
+
+If you want to test against a temporary Codex home without touching your real `~/.codex`, use:
+
+```bash
+CODEX_TARGET_OVERRIDE=/tmp/test-codex-home ./sync-skills.sh install
 ```
 
 ### Add a New Skill
@@ -216,6 +242,7 @@ The sync script validates:
 - UI/UX strengthening and memory tool-mistake wording
 - README and validation-report inventory parity
 - top-level guidance drift and Codex-home wiring
+- source-vs-installed MD5 parity for the copied managed skill files after sync or install
 
 ## Troubleshooting
 
