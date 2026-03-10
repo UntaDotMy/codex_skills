@@ -107,15 +107,65 @@ bootstrap_ensure_managed_repository_clone() {
     trap - RETURN
 }
 
+bootstrap_refresh_external_entry_script_copy() {
+    local external_script_path=$1
+    local managed_script_path=$2
+    local external_directory
+    local temporary_script_path
+
+    [[ -n "$external_script_path" ]] || return 0
+    [[ -f "$external_script_path" ]] || return 0
+    [[ -f "$managed_script_path" ]] || return 0
+
+    if [[ "$external_script_path" == "$managed_script_path" ]]; then
+        return 0
+    fi
+
+    if cmp -s "$managed_script_path" "$external_script_path"; then
+        return 0
+    fi
+
+    external_directory="$(dirname "$external_script_path")"
+    if [[ ! -w "$external_directory" ]] || [[ ! -w "$external_script_path" ]]; then
+        bootstrap_print_info "Managed clone is newer, but the standalone entry script is not writable: $external_script_path"
+        return 0
+    fi
+
+    temporary_script_path="$(mktemp "$external_directory/.codex-bootstrap-sync.XXXXXX")" || {
+        bootstrap_print_info "Unable to allocate a temporary file to refresh the standalone entry script: $external_script_path"
+        return 0
+    }
+
+    if cp -p "$managed_script_path" "$temporary_script_path" && mv "$temporary_script_path" "$external_script_path"; then
+        bootstrap_print_info "Refreshed standalone entry script from managed clone: $external_script_path"
+        return 0
+    fi
+
+    rm -f "$temporary_script_path"
+    bootstrap_print_info "Unable to refresh the standalone entry script automatically: $external_script_path"
+    return 0
+}
+
+refresh_bootstrap_entry_script_from_repo() {
+    local external_script_path="${CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH:-}"
+    local managed_script_path
+
+    [[ -n "$external_script_path" ]] || return 0
+    managed_script_path="$CODEX_SOURCE/$(basename "$external_script_path")"
+    bootstrap_refresh_external_entry_script_copy "$external_script_path" "$managed_script_path"
+}
+
 bootstrap_delegate_if_needed() {
     local repository_url
     local repository_branch
     local managed_repository_path
+    local current_script_path
 
     if bootstrap_repository_layout_is_complete "$SCRIPT_DIR"; then
         return 0
     fi
 
+    current_script_path="${BASH_SOURCE[0]}"
     repository_url="${CODEX_SKILLS_REPOSITORY_URL:-$BOOTSTRAP_DEFAULT_REPOSITORY_URL}"
     repository_branch="${CODEX_SKILLS_REPOSITORY_BRANCH:-$BOOTSTRAP_DEFAULT_REPOSITORY_BRANCH}"
     managed_repository_path="$(resolve_bootstrap_repository_path)"
@@ -129,10 +179,12 @@ bootstrap_delegate_if_needed() {
     fi
 
     bootstrap_print_info "Using managed clone: $managed_repository_path"
+    export CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH="$current_script_path"
     exec bash "$managed_repository_path/sync-skills.sh" "$@"
 }
 
 bootstrap_delegate_if_needed "$@"
+refresh_bootstrap_entry_script_from_repo
 
 detect_platform_name() {
     local uname_value
@@ -1338,6 +1390,13 @@ markdown_section_contains_all_patterns() {
     return 0
 }
 
+markdown_first_matching_heading() {
+    local file_path=$1
+    local heading_pattern=$2
+
+    grep -E "^## (${heading_pattern})$" "$file_path" | head -n 1 | sed 's/^## //'
+}
+
 skill_has_required_runtime_guidance() {
     local file_path=$1
 
@@ -1361,23 +1420,16 @@ agent_config_has_required_runtime_guidance() {
     local file_path=$1
 
     file_contains_all_patterns "$file_path" \
+        'working brief' \
+        'freshness-aware research cache' \
+        'Research current external information before trusting internal knowledge' \
+        'keep iterating in the same turn' \
         'js_repl' \
         'codex\.tool' \
-        'Always research current external information before trusting internal knowledge' \
-        'freshness-aware research cache' \
-        'missing, stale, uncertain, or explicitly time-sensitive|missing, stale, uncertain, or time-sensitive' \
-        'keep iterating in the same turn' \
-        'terminal state before finalizing|wait[^\n]*required sub-agent' \
-        'Do not close a required running sub-agent|forbid closing a running required sub-agent early' \
-        'keep at most one live same-role agent' \
-        'never spawn a second same-role sub-agent if one already exists' \
-        'always reuse it with send_input or resume_agent|always reuse it with .*send_input.*resume_agent' \
-        'resume a closed same-role agent before considering any new spawn' \
-        'fork_context off unless the exact parent thread history is required|fork_context[^\n]*exact parent thread history' \
-        'maintain a lightweight spawned-agent list' \
-        'send a robust handoff covering the exact objective' \
-        'working brief' \
-        'test-first when practical'
+        'reuse the same-role agent' \
+        'keep the handoff bounded' \
+        'terminal state before finalizing|wait[^\n]*terminal state' \
+        'main agent performs final'
 }
 
 # Validate a Codex skill directory for Codex-specific requirements and separation.
@@ -1409,6 +1461,28 @@ validate_codex_skill_dir() {
     # Expert-grade skills must ship reference material, not only a top-level summary.
     if [[ ! -d "$skill_dir/references" ]]; then
         print_error "Missing references/ directory for Codex skill: $skill_name"
+        return 1
+    fi
+
+    if ! grep -q '^## Use This Skill When$' "$skill_dir/SKILL.md"; then
+        print_error "Codex skill is missing a Use This Skill When section: $skill_name"
+        return 1
+    fi
+
+    if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Use This Skill When" 3; then
+        print_error "Codex skill is missing concrete trigger boundaries in Use This Skill When: $skill_name"
+        return 1
+    fi
+
+    local scenario_heading
+    scenario_heading="$(markdown_first_matching_heading "$skill_dir/SKILL.md" 'Real-World Scenarios|Real-World Failure Scenarios|Real-World Review Scenarios')"
+    if [[ -z "$scenario_heading" ]]; then
+        print_error "Codex skill is missing a real-world scenario section: $skill_name"
+        return 1
+    fi
+
+    if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "$scenario_heading" 2; then
+        print_error "Codex skill is missing concrete real-world scenario coverage: $skill_name"
         return 1
     fi
 
@@ -1492,6 +1566,14 @@ validate_codex_skill_dir() {
                 print_error "Web-development-life-cycle skill is missing the expected depth in structure or delivery heuristics"
                 return 1
             fi
+            if markdown_section_content "$skill_dir/SKILL.md" "Core Web Vitals" | grep -q "FID"; then
+                print_error "Web-development-life-cycle skill still lists FID as a Core Web Vital"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Core Web Vitals" "INP"; then
+                print_error "Web-development-life-cycle skill must include INP in Core Web Vitals guidance"
+                return 1
+            fi
             ;;
         mobile-development-life-cycle)
             if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Structure Defaults" "permission" "offline" "higher-layer confirmation"; then
@@ -1500,6 +1582,14 @@ validate_codex_skill_dir() {
             fi
             if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Structure Defaults" 4 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Delivery Heuristics by Mobile Surface" 5 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Mobile Delivery Decision Matrix" 5; then
                 print_error "Mobile-development-life-cycle skill is missing the expected depth in structure or delivery heuristics"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Android Development" "Keystore"; then
+                print_error "Mobile-development-life-cycle skill must reference Android Keystore guidance"
+                return 1
+            fi
+            if markdown_section_content "$skill_dir/SKILL.md" "Android Development" | grep -q "Keychain"; then
+                print_error "Mobile-development-life-cycle skill incorrectly references Keychain in Android guidance"
                 return 1
             fi
             ;;
@@ -1540,6 +1630,10 @@ validate_codex_skill_dir() {
                 print_error "UI skill is missing component-verification defaults"
                 return 1
             fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "UI and UX Ownership Boundary" "UI owns" "UX owns"; then
+                print_error "UI skill is missing bounded UI-vs-UX ownership guidance"
+                return 1
+            fi
             if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Professional Polish Checks" "No emoji as product UI icons"; then
                 print_error "UI skill is missing professional-polish delivery checks"
                 return 1
@@ -1574,12 +1668,26 @@ validate_codex_skill_dir() {
                 print_error "UX skill is missing validation-loop defaults"
                 return 1
             fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "UX and UI Ownership Boundary" "UX owns" "UI owns"; then
+                print_error "UX skill is missing bounded UX-vs-UI ownership guidance"
+                return 1
+            fi
             if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Decision Confidence and Recovery Checks" "Errors preserve progress"; then
                 print_error "UX skill is missing decision-confidence or recovery checks"
                 return 1
             fi
             if [[ ! -f "$skill_dir/references/55-experience-briefs-brownfield-and-validation-loops.md" ]] || ! grep -q "55-experience-briefs-brownfield-and-validation-loops.md" "$skill_dir/references/00-ux-knowledge-map.md"; then
                 print_error "UX skill references are missing the experience-brief brownfield reference wiring"
+                return 1
+            fi
+            ;;
+        git-expert)
+            if markdown_section_content "$skill_dir/SKILL.md" "Essential Git Commands" | grep -Eq 'git rebase -i|git reset --hard|git checkout -- <file>|git filter-branch'; then
+                print_error "Git skill keeps high-risk commands inside Essential Git Commands"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "High-Risk Operations \(Explicit User Approval Only\)" "explicit user approval" "git reset --hard" "git rebase -i"; then
+                print_error "Git skill is missing explicit high-risk operation gating"
                 return 1
             fi
             ;;
@@ -1604,6 +1712,8 @@ validate_codex_agent_config() {
     local expected_reasoning="high"
     local configured_model=""
     local expected_override_model=""
+    local expected_allow_implicit="true"
+    local default_prompt_word_count=0
 
     if [[ -f "$CODEX_TARGET/config.toml" ]]; then
         local detected_model
@@ -1638,20 +1748,37 @@ validate_codex_agent_config() {
         return 1
     fi
 
+    default_prompt_word_count="$(extract_codex_openai_value "$config_file" "default_prompt" | wc -w | awk '{print $1}')"
+    if [[ "$default_prompt_word_count" -gt 260 ]]; then
+        print_error "Codex agent prompt is too long and likely duplicates repo policy: $skill_name ($default_prompt_word_count words)"
+        return 1
+    fi
+
+    case "$skill_name" in
+        reviewer|software-development-life-cycle|memory-status-reporter|git-expert)
+            expected_allow_implicit="false"
+            ;;
+    esac
+
+    if ! grep -q "^  allow_implicit_invocation: $expected_allow_implicit$" "$config_file"; then
+        print_error "Unexpected allow_implicit_invocation policy for Codex skill: $skill_name"
+        return 1
+    fi
+
     if [[ "$home_agent_name" == "reviewer" ]]; then
-        if ! grep -q "main agent must verify" "$config_file" || ! grep -q "may send updated work back" "$config_file"; then
-            print_error "Reviewer-family prompts must require main-agent verification and allow re-review after updates: $home_agent_name"
+        if ! grep -q "findings first" "$config_file" || ! grep -q "Do not mutate code by default" "$config_file"; then
+            print_error "Reviewer-family prompts must stay review-first and non-mutating by default: $home_agent_name"
             return 1
         fi
     fi
 
-    if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && ! grep -q "Raise the design bar: act like a strong product designer" "$config_file"; then
-        print_error "UI skill prompt must require a stronger product-design bar: $skill_name"
+    if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && ! grep -q "design intelligence packet" "$config_file"; then
+        print_error "UI skill prompt must require a design intelligence packet: $skill_name"
         return 1
     fi
 
-    if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && { ! grep -q "design intelligence packet" "$config_file" || ! grep -q "Storybook, Ladle, or Histoire" "$config_file" || ! grep -q "master plus page-override pattern" "$config_file"; }; then
-        print_error "UI skill prompt must require design-intelligence packets, brownfield-safe persistence, and component-story verification: $skill_name"
+    if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && { ! grep -q "UI owns" "$config_file" || ! grep -q "UX owns" "$config_file" || ! grep -q "Storybook, Ladle, or Histoire" "$config_file"; }; then
+        print_error "UI skill prompt must keep UI-vs-UX ownership and component-preview validation explicit: $skill_name"
         return 1
     fi
 
@@ -1660,17 +1787,17 @@ validate_codex_agent_config() {
         return 1
     fi
 
-    if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && ! grep -q "Start by hardening the request into a crisp product brief" "$config_file"; then
-        print_error "UX skill prompt must require crisp product-brief hardening: $skill_name"
+    if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && ! grep -q "experience brief" "$config_file"; then
+        print_error "UX skill prompt must require experience-brief hardening: $skill_name"
         return 1
     fi
 
-    if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && { ! grep -q "Build an experience brief" "$config_file" || ! grep -q "safe fallback slugs" "$config_file" || ! grep -q "Storybook, Ladle, Histoire" "$config_file"; }; then
-        print_error "UX skill prompt must require experience briefs, safe persistence, and component-preview validation loops: $skill_name"
+    if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && { ! grep -q "UX owns" "$config_file" || ! grep -q "UI owns" "$config_file" || ! grep -q "Storybook, Ladle, or Histoire" "$config_file"; }; then
+        print_error "UX skill prompt must keep UX-vs-UI ownership and component-preview validation explicit: $skill_name"
         return 1
     fi
 
-    if [[ "$skill_name" == "memory-status-reporter" ]] && { ! grep -q "tool-use mistakes" "$config_file" || ! grep -q "Rewarded Patterns" "$config_file" || ! grep -q "Research Cache Health" "$config_file"; }; then
+    if [[ "$skill_name" == "memory-status-reporter" ]] && { ! grep -q "tool-use mistakes" "$config_file" || ! grep -q "patterns were rewarded" "$config_file" || ! grep -q "research-cache items look stale" "$config_file"; }; then
         print_error "Memory status prompt must mention tool-use mistakes, rewarded patterns, and research cache health: $skill_name"
         return 1
     fi
@@ -1706,6 +1833,16 @@ validate_codex_guidance_file() {
 
         if ! grep -qi "Never close a required sub-agent while its status is still running or queued" "$file"; then
             print_error "Missing no-close-while-running policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "Route directly to the primary domain skill" "$file"; then
+            print_error "Missing direct-to-domain default routing policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi 'Start with `reviewer` only for audits' "$file"; then
+            print_error "Missing narrowed reviewer-first default policy in AGENTS.md"
             return 1
         fi
 
@@ -1857,6 +1994,11 @@ validate_codex_repo_docs() {
         ((failed+=1))
     fi
 
+    if ! grep -q "only one skill owns the final synthesis" "$CODEX_SOURCE/00-skill-routing-and-escalation.md" || ! grep -q "let \*\*ux-research-and-experience-strategy\*\* manage the work" "$CODEX_SOURCE/00-skill-routing-and-escalation.md" || ! grep -q "let \*\*ui-design-systems-and-responsive-interfaces\*\* manage the work" "$CODEX_SOURCE/00-skill-routing-and-escalation.md"; then
+        print_error "00-skill-routing-and-escalation.md is missing explicit UI-versus-UX ownership routing"
+        ((failed+=1))
+    fi
+
     if ! grep -q "### Root Codex Skills ($codex_skill_count)" "$CODEX_SOURCE/VALIDATION_REPORT.md"; then
         print_error "VALIDATION_REPORT.md Codex skill count is out of sync with the repo inventory"
         ((failed+=1))
@@ -1879,6 +2021,19 @@ validate_codex_repo_docs() {
 
     print_success "Codex guidance files validated"
     return 0
+}
+
+run_repo_contract_tests() {
+    ensure_python_launcher || return 1
+
+    run_python -m py_compile \
+        "$CODEX_SOURCE/memory-status-reporter/scripts/memory_status_report.py" \
+        "$CODEX_SOURCE/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py" \
+        "$CODEX_SOURCE/tests/test_skill_pack_contracts.py" || return 1
+
+    run_python -m unittest \
+        "$CODEX_SOURCE/ui-design-systems-and-responsive-interfaces/tests/test_design_intelligence.py" \
+        "$CODEX_SOURCE/tests/test_skill_pack_contracts.py"
 }
 extract_codex_openai_value() {
     local openai_yaml_path=$1
@@ -2174,6 +2329,7 @@ sync_codex() {
         return 1
     fi
 
+    refresh_bootstrap_entry_script_from_repo
     print_success "Codex skills sync complete"
 }
 
@@ -2237,6 +2393,8 @@ validate_all() {
         print_error "Validation failed for skill: $failed_skill_name"
         ((failed+=1))
     done < <(collect_failed_skill_names_parallel)
+
+    run_task_line "contract tests" run_repo_contract_tests || ((failed+=1))
 
     if [[ $failed -eq 0 ]]; then
         print_success "All skills validated successfully"
@@ -2622,11 +2780,13 @@ update_codex() {
         print_success "Installed skill pack is already up to date"
         verify_pack_checksums || return 1
         write_install_metadata || return 1
+        refresh_bootstrap_entry_script_from_repo
         return 0
     fi
 
     print_info "update plan: repo=$(get_repo_version) installed=$(get_installed_version) changed=${#changed_skills[@]} removed=${#removed_skills[@]} root_refresh=$root_files_changed"
-    sync_codex_delta_update "$root_files_changed" "${changed_skills[@]}"
+    sync_codex_delta_update "$root_files_changed" "${changed_skills[@]}" || return 1
+    refresh_bootstrap_entry_script_from_repo
 }
 
 choose_installed_skill_interactively() {

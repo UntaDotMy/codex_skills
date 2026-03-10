@@ -26,6 +26,12 @@ Improve UX decisions using proven real-world patterns while preserving product f
 - Prefer incremental UX changes with measurable impact.
 - Use progressive disclosure for advanced functionality to protect novice usability.
 
+## Named Product-Family Rule
+
+- When the user names an existing product family, benchmark that family directly before proposing a replacement pattern.
+- State which conventions are worth preserving because users already rely on them and which friction points truly justify change.
+- For direct messaging flows, benchmark conversation list scanning, thread continuity, composer placement, delivery feedback, and interruption recovery before exploring more novel interaction ideas.
+
 ## Risk Checks
 
 Flag as risk when:

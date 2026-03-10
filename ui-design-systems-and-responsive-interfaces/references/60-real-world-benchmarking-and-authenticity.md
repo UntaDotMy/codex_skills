@@ -34,6 +34,12 @@ For each major UI direction:
 - Introduce novelty only when it measurably improves usability or brand expression.
 - Favor proven navigation and form patterns unless evidence shows the baseline fails target users.
 
+## Named Product-Family Rule
+
+- When the prompt names an existing product family, benchmark that family explicitly instead of substituting a generic product template.
+- Extract the familiar interaction spine first: navigation model, thread or panel structure, composer or action placement, status semantics, and recovery cues.
+- For messaging products, keep message content and conversation continuity visually dominant; supporting chrome, wallpapers, cards, and animations should remain subordinate.
+
 ## Anti-Pattern Checklist
 
 Treat these as warning signals:

@@ -14,6 +14,12 @@ Capture these fields before recommending changes:
 6. Success metrics and failure signals
 7. Brownfield constraints: established brand rules, regulatory limits, technical dependencies, release sensitivity
 
+If the request references a familiar product family, also capture:
+
+8. Which familiar behaviors must stay recognizable to existing users
+9. Which part of the journey actually feels broken enough to justify redesign
+10. Which interruption and recovery risks matter most, such as drafts, retries, presence, or attachment state in messaging flows
+
 ## Brownfield Redesign Rules
 
 - Preserve mental models users already rely on unless evidence shows they are harmful.

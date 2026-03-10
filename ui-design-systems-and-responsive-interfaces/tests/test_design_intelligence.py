@@ -112,6 +112,35 @@ class DesignIntelligenceScriptTests(unittest.TestCase):
         self.assertEqual(payload["style_family"]["id"], "native-mobile-layering")
         self.assertEqual(payload["stack_profile"]["id"], "flutter-mobile")
 
+    def test_direct_messaging_query_selects_messaging_archetype(self) -> None:
+        command = [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "direct messaging mobile app with unread states voice notes and conversation list",
+            "--stack",
+            "flutter",
+            "--format",
+            "json",
+        ]
+        completed_process = subprocess.run(command, check=True, capture_output=True, text=True)
+        payload = json.loads(completed_process.stdout)
+        self.assertEqual(payload["product_archetype"]["id"], "messaging-product")
+        self.assertEqual(payload["style_family"]["id"], "conversation-first-clarity")
+        self.assertEqual(payload["platform"], "mobile")
+        self.assertFalse(payload["needs_clarification"])
+
+    def test_messaging_behavior_is_catalog_driven(self) -> None:
+        script_text = SCRIPT_PATH.read_text(encoding="utf-8")
+        catalog_payload = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+        messaging_entry = next(
+            entry for entry in catalog_payload["product_archetypes"] if entry["id"] == "messaging-product"
+        )
+
+        self.assertNotIn('if product_archetype.identifier == "messaging-product"', script_text)
+        self.assertIn("professional_polish_checks", messaging_entry)
+        self.assertIn("recovery_checks", messaging_entry)
+        self.assertIn("verification_checks", messaging_entry)
+
     def test_query_only_react_native_phrase_selects_correct_stack_profile(self) -> None:
         command = [
             sys.executable,
@@ -149,6 +178,45 @@ class DesignIntelligenceScriptTests(unittest.TestCase):
             "Preserve entered data and user progress after validation, network, or permission failures.",
             payload["recovery_checks"],
         )
+        self.assertIn("target_user", payload["design_intelligence_packet"])
+        self.assertIn("trigger", payload["design_intelligence_packet"])
+        self.assertIn("primary_surface_model", payload["design_intelligence_packet"])
+        self.assertIn("critical_failure_modes", payload["design_intelligence_packet"])
+        self.assertIn("benchmark_strategy", payload["design_intelligence_packet"])
+        self.assertIn("selection_signals", payload["design_intelligence_packet"])
+
+    def test_low_confidence_query_sets_clarification_flag(self) -> None:
+        command = [
+            sys.executable,
+            str(SCRIPT_PATH),
+            "redesign the app",
+            "--format",
+            "json",
+        ]
+        completed_process = subprocess.run(command, check=True, capture_output=True, text=True)
+        payload = json.loads(completed_process.stdout)
+        self.assertTrue(payload["needs_clarification"])
+        self.assertIn("surface-specific detail", payload["clarification_reason"])
+        self.assertNotIn("product_archetype", payload)
+        self.assertIn("requested_brief_fields", payload)
+        self.assertEqual(
+            payload["selection_signals"]["product_archetype"]["meaningful_matched_keywords"],
+            [],
+        )
+
+    def test_low_confidence_query_cannot_persist(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            command = [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "redesign the app",
+                "--persist",
+                "--output-dir",
+                temporary_directory,
+            ]
+            completed_process = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(completed_process.returncode, 0)
+            self.assertIn("Cannot persist a low-confidence design recommendation.", completed_process.stderr)
 
     def test_home_like_layout_can_run_with_relative_catalog(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -23,6 +23,13 @@ You are a senior web engineer building production-ready websites and web applica
 - When validation, testing, or review reveals another in-scope bug or quality gap, keep iterating in the same turn and fix the next issue before handing off.
 - Only stop early when blocked by ambiguous business requirements, missing external access, or a clearly labeled out-of-scope item.
 
+## Use This Skill When
+
+- The main risk is inside a website or web-app surface: rendering, state flow, performance, accessibility, SEO, or browser compatibility.
+- A route, page, API boundary, or deployment-sensitive web flow needs architecture or implementation decisions.
+- The work spans frontend and backend behavior for one web journey and needs a web-first delivery posture.
+- Release confidence depends on proving realistic browser, performance, or rollout behavior rather than generic framework advice.
+
 ## Core Principles
 
 1. **Progressive Enhancement**: Start with HTML, enhance with CSS/JS
@@ -146,9 +153,9 @@ Use these concrete defaults when the user asks for execution help:
 
 ### Core Web Vitals
 - **LCP (Largest Contentful Paint)**: < 2.5s (main content visible)
-- **FID (First Input Delay)**: < 100ms (interactive)
 - **CLS (Cumulative Layout Shift)**: < 0.1 (visual stability)
 - **INP (Interaction to Next Paint)**: < 200ms (responsiveness)
+- **TTFB / FCP**: Treat as supporting diagnostics when they explain a slow LCP or poor responsiveness, not as Core Web Vitals replacements
 
 ### Optimization Techniques
 - **Images**: WebP/AVIF format, responsive images, lazy loading

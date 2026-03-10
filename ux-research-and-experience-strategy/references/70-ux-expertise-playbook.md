@@ -43,6 +43,12 @@ Deliver this baseline package first:
 - Check CTA/button confidence in both modes (state clarity, affordance, and semantic color meaning).
 - Flag mode-specific regressions where one mode degrades decision clarity.
 
+## Named Product-Family Baseline
+
+- If the request references an existing product family, research the live product family before recommending change.
+- Preserve the familiar journey skeleton unless evidence shows it is the source of user harm.
+- For messaging products, define how users scan recent conversations, recover the correct thread, send confidently, and recover drafts or failed sends before redesigning surface details.
+
 ## Noise Reduction Baseline
 
 - Reduce unnecessary options shown at each decision point.

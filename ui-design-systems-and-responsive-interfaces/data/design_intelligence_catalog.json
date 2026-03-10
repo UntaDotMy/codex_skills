@@ -167,6 +167,33 @@
       "recommended_density": "balanced",
       "cta_guidance": "Keep one thumb-friendly primary action in reach and preserve context across interruptions.",
       "anti_patterns": ["desktop patterns squeezed onto mobile", "tap targets without breathing room", "keyboard overlap on primary actions"]
+    },
+    {
+      "id": "messaging-product",
+      "display_name": "Messaging Product",
+      "keywords": ["messaging", "message", "messages", "chat", "conversation", "conversations", "direct", "dm", "thread", "threads", "inbox", "reply", "replies", "unread", "composer", "voice", "attachment"],
+      "trust_posture": "continuity, clarity, and safe delivery",
+      "content_priorities": ["active conversation", "recent conversations and unread state", "composer and attachment actions", "delivery, read, and retry cues"],
+      "recommended_style_families": ["conversation-first-clarity", "native-mobile-layering"],
+      "recommended_color_moods": ["conversation-signal", "trust-blue"],
+      "recommended_typography_moods": ["native-readable", "system-clarity"],
+      "recommended_motion_posture": "immediate and restrained",
+      "recommended_density": "balanced",
+      "cta_guidance": "Keep the composer persistent, make send and attachment actions unmistakable, and keep secondary conversation controls visible without stealing focus from the active thread.",
+      "professional_polish_checks": [
+        "Keep message content, timestamps, and delivery cues more prominent than decorative chrome or wallpapers.",
+        "Make composer actions, attachments, and unread indicators legible without duplicating metadata or stealing focus from the thread."
+      ],
+      "recovery_checks": [
+        "Preserve drafts, attachments, and scroll context when the user switches conversations, backgrounds the app, or reconnects.",
+        "Show send failures inline with clear retry or edit actions so users do not have to guess whether a message was delivered."
+      ],
+      "verification_checks": [
+        "Verify conversation list scanning, unread priority, and thread continuity before approving decorative styling.",
+        "Check composer, attachments, keyboard behavior, and delivery-state feedback without obscuring recent messages.",
+        "Confirm retry, failed-send, and draft-recovery paths stay visible during interruption and reconnection."
+      ],
+      "anti_patterns": ["marketing-style hero sections inside conversations", "cardified message bubbles that waste vertical space", "duplicate metadata on every message row", "novel composer placement that breaks user muscle memory", "status color overload that competes with message content"]
     }
   ],
   "style_families": [
@@ -249,6 +276,16 @@
       "motion_posture": "supportive",
       "density": "balanced",
       "anti_patterns": ["hidden progress", "generic button labels", "re-entering preserved information"]
+    },
+    {
+      "id": "conversation-first-clarity",
+      "display_name": "Conversation-First Clarity",
+      "keywords": ["messaging", "message", "chat", "conversation", "thread", "inbox", "reply", "composer", "unread", "voice", "attachment"],
+      "visual_direction": "Conversation-led hierarchy with calm chrome, compact but legible message rhythm, clear unread and delivery cues, and a stable composer anchored to the active thread.",
+      "best_for": ["direct messaging", "support inboxes", "conversation products"],
+      "motion_posture": "immediate",
+      "density": "balanced",
+      "anti_patterns": ["oversized bubbles with weak timestamp hierarchy", "marketing-card layouts in a conversation view", "background effects that reduce message contrast"]
     },
     {
       "id": "ai-assisted-clarity",
@@ -355,6 +392,14 @@
       "palette_direction": "Grounded neutrals with a confident action color and a separate proof or reassurance accent for comparisons and transactions.",
       "best_for": ["marketplaces", "booking", "catalog comparison flows"],
       "avoid_for": ["single-brand storytelling pages that do not need layered decision cues"]
+    },
+    {
+      "id": "conversation-signal",
+      "display_name": "Conversation Signal",
+      "keywords": ["messaging", "message", "chat", "conversation", "unread", "thread", "reply", "direct"],
+      "palette_direction": "Calm neutrals with one trusted accent for send and unread state, plus restrained status tones that keep message content dominant.",
+      "best_for": ["conversation products", "support inboxes", "communication tools"],
+      "avoid_for": ["brand-led storytelling surfaces that need expressive visual range"]
     }
   ],
   "typography_moods": [

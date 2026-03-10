@@ -15,6 +15,7 @@ This document defines how skills should route to each other, when to escalate to
 9. **Reuse Fresh Research First**: Check indexed memory and research-cache notes before starting a new live research loop, then research only the missing, stale, uncertain, or time-sensitive delta
 10. **Completion Is Evidence-Based**: A skill should treat work as done only when the requested outcome, validation, and explicit runtime boundaries are all clear
 11. **Fix The Next Bug Too**: When validation exposes another in-scope bug, keep iterating in the same turn instead of handing off after the first fix
+12. **Benchmark Familiar Product Families**: When a request references an existing product family, benchmark the live category and preserve familiar mental models before inventing a new UI or UX direction
 
 ## Routing Authority and Overlap Resolution
 
@@ -23,6 +24,10 @@ When multiple skills could plausibly apply, steer by decision ownership instead 
 - Use **software-development-life-cycle** when the task is primarily about sequencing work, choosing architecture, or coordinating across layers.
 - Use **reviewer** when the task is primarily about production readiness, release risk, simplification, or gap-finding after implementation.
 - Use a domain specialist when the main risk lives inside that surface: web, mobile, backend, cloud/devops, QA, security, UI, UX, git, or memory.
+- If UI or UX work references a familiar product family, route through the UI and UX specialists with product-family benchmarking rather than treating it like a generic greenfield interface.
+- If the main problem is journey friction, decision architecture, funnel drop-off, recovery behavior, or user familiarity, let **ux-research-and-experience-strategy** manage the work and ask UI for bounded visual translation only.
+- If the main problem is layout hierarchy, component states, responsive behavior, design-token drift, or implementation-facing accessibility polish, let **ui-design-systems-and-responsive-interfaces** manage the work and ask UX for bounded flow evidence only.
+- When UI and UX both participate, only one skill owns the final synthesis; the supporting skill should contribute the missing layer instead of producing a second full end-to-end answer.
 - If a task spans multiple domains, keep one skill as the manager and treat other specialists as bounded contributors through agents-as-tools, handoffs, or deterministic code orchestration as appropriate.
 - If the remaining uncertainty is about business intent rather than technical implementation, do not route deeper first; clarify with the user.
 

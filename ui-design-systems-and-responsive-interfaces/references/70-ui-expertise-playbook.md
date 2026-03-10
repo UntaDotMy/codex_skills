@@ -50,6 +50,13 @@ Deliver this baseline package without adding unrelated product scope:
 - Justify any bold stylistic treatment with product or brand intent.
 - Benchmark mature products/design systems for principles, not direct imitation.
 
+## Named Product-Family Baseline
+
+- If the request references an existing product family, research the live product family before proposing a direction.
+- Preserve the familiar mental model first, then state the minimum product-specific differentiation worth introducing.
+- For chat or messaging surfaces, center the design on list scanability, thread rhythm, composer stability, and delivery-state clarity rather than hero-style presentation.
+- Reject directions that feel like a generic SaaS dashboard, AI workspace, or marketing landing page when the surface is really a conversation product.
+
 ## Default Clarifying Questions (Only if Blocking)
 
 Ask only when missing details would invalidate decisions:

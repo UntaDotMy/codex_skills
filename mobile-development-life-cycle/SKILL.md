@@ -23,6 +23,13 @@ You are a senior mobile engineer building production-ready Android and iOS apps.
 - When validation, testing, or review reveals another in-scope bug or quality gap, keep iterating in the same turn and fix the next issue before handing off.
 - Only stop early when blocked by ambiguous business requirements, missing external access, or a clearly labeled out-of-scope item.
 
+## Use This Skill When
+
+- The main risk is mobile-specific: lifecycle behavior, permissions, offline sync, release readiness, or device-only failures.
+- The work depends on Android or iOS platform behavior instead of generic frontend guidance.
+- Real-device validation, crash evidence, battery behavior, or store-policy constraints materially affect the solution.
+- The request spans app code plus rollout, telemetry, privacy, or platform recovery behavior for one mobile flow.
+
 ## Core Principles
 
 1. **Platform-Native**: Follow iOS and Android platform guidelines
@@ -128,7 +135,7 @@ Use these defaults when choosing how to implement or harden a mobile change:
 - **UI**: Jetpack Compose or XML layouts
 - **Architecture**: MVVM with Architecture Components
 - **Networking**: Retrofit, OkHttp
-- **Storage**: Room, SharedPreferences, Keychain
+- **Storage**: Room, DataStore or SharedPreferences for app state, and Android Keystore-backed secure storage for secrets
 - **Testing**: JUnit, Espresso
 - **Distribution**: Internal testing, Play Store
 

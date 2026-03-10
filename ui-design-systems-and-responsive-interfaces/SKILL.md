@@ -23,6 +23,13 @@ You are a senior UI designer/engineer creating production-ready, accessible, res
 - When validation, testing, or review reveals another in-scope bug or quality gap, keep iterating in the same turn and fix the next issue before handing off.
 - Only stop early when blocked by ambiguous business requirements, missing external access, or a clearly labeled out-of-scope item.
 
+## Use This Skill When
+
+- The main risk is visual hierarchy, component composition, responsive behavior, design tokens, or accessibility execution.
+- A product surface needs implementation-ready UI direction instead of broad experience strategy.
+- The work depends on translating a product-family benchmark into concrete screens, states, and system rules.
+- Brownfield design quality is blocked by weak layout, inconsistent components, vague theming, or generic-looking output.
+
 ## Core Principles
 
 1. **Accessibility First**: WCAG 2.1 AA minimum, keyboard navigation, screen reader support
@@ -63,6 +70,24 @@ Before proposing a visual direction, assemble a compact design intelligence pack
 
 Use this packet to recommend one strong default design system direction rather than a pile of disconnected aesthetics.
 
+## Product-Family and Messaging Defaults
+
+When the user references an existing product family or benchmark:
+- research the current product family and relevant platform guidance before proposing changes
+- name what should feel familiar to existing users and what is intentionally different
+- preserve the core mental model first: conversation list, active thread, stable composer, and clear delivery or recovery states
+- keep conversation surfaces calm: message content, timestamps, unread state, typing or presence cues, and attachment actions should outrank decorative chrome
+- prefer compact, product-native spacing and restrained theming over marketing cards, heavy gradients, or novelty motion
+- for 1:1 messaging, optimize for rapid scan, safe reply, draft preservation, keyboard safety, attachment clarity, and inline failed-send recovery
+- borrow transferable hierarchy and interaction rules, not brand assets or proprietary layouts one-to-one
+
+## UI and UX Ownership Boundary
+
+- UI owns visual hierarchy, layout structure, component composition, tokens, interaction states, motion posture, and responsive or accessibility translation into the actual interface.
+- UX owns the job-to-be-done, journey shape, decision architecture, friction diagnosis, validation logic, and experiment or rollout questions.
+- When UI and UX are paired, UI should not produce a second full journey strategy; instead it should translate the approved experience direction into concrete screens, states, and reusable patterns.
+- If the primary problem is scanability, theming, component drift, breakpoint behavior, or implementation fidelity, UI leads and requests only the UX evidence needed to support the visual solution.
+
 ## Design Reasoning Engine Defaults
 
 When the prompt is vague or the current UI looks generic, infer a sharper visual direction from product context instead of defaulting to bland SaaS styling:
@@ -82,6 +107,7 @@ Adjust the recommendation to the actual surface instead of treating every reques
 - **Dashboards and data tools**: prioritize scanning, comparison, filter clarity, table legibility, sticky context, and low-noise emphasis for alerts and primary actions
 - **Marketing and landing pages**: lead with a strong hero, proof, offer framing, social trust, objection handling, and a repeated CTA rhythm without visual spam
 - **Onboarding and forms**: reduce cognitive load, chunk information, preserve progress, explain why fields matter, and make recovery obvious
+- **Messaging and inbox surfaces**: prioritize conversation-list scanability, thread continuity, stable composer behavior, delivery and read-state clarity, and keyboard-safe attachment actions
 - **Mobile-first consumer flows**: design thumb-friendly actions, strong section separation, low-friction checkout or booking, and compressed but readable density
 - **Settings, admin, and enterprise surfaces**: favor calm hierarchy, explicit destructive-action handling, system-status visibility, and predictable navigation landmarks
 - **Empty, sparse, or early-stage products**: use a premium sparse layout only when the content supports it; otherwise add structure, proof, examples, or guided next steps so the UI does not feel unfinished
@@ -96,6 +122,8 @@ When producing UI guidance, provide concrete design direction rather than vague 
 - Cover key states: default, hover, focus, active, disabled, loading, empty, error, and success.
 - Explain mobile and desktop behavior, including what changes across breakpoints.
 - Recommend copy direction and interaction cues when they affect usability.
+- For known product families, state what should feel familiar to existing users and what must stay unique to the current product.
+- For messaging flows, specify the conversation list, thread, composer, delivery states, and failure-recovery behavior instead of treating the screen like a generic card layout.
 - Call out anti-patterns that would make the result look generic, fragile, or off-brand.
 - Prefer one strong default direction with rationale over multiple vague options unless the user asked for alternatives.
 
@@ -154,6 +182,9 @@ python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.
 # Stack-aware recommendations for real implementation constraints
 python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "AI workspace for research copilots" --stack nextjs --component-library shadcn --format json
 
+# Messaging-oriented recommendation with mobile constraints
+python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "direct messaging mobile app with unread states and voice notes" --stack flutter --format json
+
 # Persist a master design system and a page-specific override safely
 python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py \
   "ecommerce checkout optimization" \
@@ -163,6 +194,7 @@ python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.
 ```
 
 Use the generator to produce a first-pass design intelligence packet, then refine it with repo evidence, brownfield constraints, real validation signals, professional polish checks, and recovery-state review before implementing.
+If the generator reports that clarification is needed, tighten the working brief before trusting the recommendation.
 
 ## UI Quality Checklist
 
@@ -445,6 +477,7 @@ Use single-agent for straightforward UI tasks or when changes need one coordinat
 - **Accessibility Before Launch**: A release candidate looks polished but has keyboard, contrast, or screen-reader gaps; use this skill to prioritize fixes by severity and user impact.
 - **Responsive Complexity**: A feature works on desktop but breaks under constrained layouts; use this skill to isolate token, layout, and interaction causes without overfitting one viewport.
 - **Brownfield Modernization**: A product has real users, existing branding, and a few painful surfaces; use this skill to preserve what still works, capture a master design direction, and modernize only the risky or outdated areas.
+- **Messaging Surface Rehabilitation**: A chat or inbox experience feels generic, cluttered, or unlike the product family users expect; use this skill to benchmark familiar conversation patterns and rebuild the list-thread-composer hierarchy without copying branding.
 
 ## Workflow
 

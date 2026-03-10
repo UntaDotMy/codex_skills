@@ -26,6 +26,7 @@ Use this reference when you want a structured UI recommendation packet generated
 python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "saas dashboard for incident response"
 python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "portfolio redesign for a creative agency" --format json
 python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "AI workspace for research copilots" --stack nextjs --component-library shadcn --format json
+python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "direct messaging mobile app with unread states and voice notes" --stack flutter --format json
 python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "checkout recovery improvements" --persist --project-name "Storefront Revamp" --page "Checkout Flow"
 ```
 
@@ -36,6 +37,8 @@ The generator now emits more than style picks:
 - stack-aware adaptation guidance when `--stack` is provided
 - professional polish checks for affordance, CTA clarity, contrast, and layout stability
 - recovery checks for validation, interruption, and high-trust flow handling
+- product-family-aware recommendations for familiar surfaces such as direct messaging
+- selection signals and an explicit clarification flag when the prompt is too vague to classify safely
 
 ## Persistence Safety
 

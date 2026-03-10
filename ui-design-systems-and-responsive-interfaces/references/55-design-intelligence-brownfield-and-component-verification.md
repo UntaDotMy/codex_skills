@@ -15,6 +15,12 @@ Before recommending visuals, capture:
 7. Implementation constraints: framework, component library, dark mode, performance budget, supported devices
 8. Anti-patterns that would make the result feel off-brand, low-trust, or generic
 
+If the request references a familiar product family, also capture:
+
+9. The named benchmark product family and the specific behaviors that should remain familiar
+10. The core surface model to preserve, such as list to thread to composer for messaging
+11. Theme, safe-area, keyboard, and interruption constraints that materially affect the surface
+
 ## Brownfield Redesign Rules
 
 - Preserve proven brand assets and familiar navigation unless evidence says they are the problem.

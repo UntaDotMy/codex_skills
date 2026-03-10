@@ -109,4 +109,6 @@ Optional verification or uninstall:
 - Context-efficiency policy: documented, validator-backed, and wired into live config
 - Research reuse and autonomy policy: documented across root docs, every skill playbook, runtime prompts, and synced home guidance
 - Memory reporting: supports both full reports and compact learning snapshots
-- Primary remaining risk: literal-string validator drift if future wording changes without updating the checks
+- Validation depth: green on direct contract tests plus a nested `sync-skills.sh validate` smoke path, with shell-helper coverage for heading discovery and prompt-contract checks for autonomy, cache reuse, and handoff discipline
+- Standalone bootstrap resilience: one-file `sync-skills.sh` and `sync-skills.ps1` copies now refresh themselves from the managed clone when writable; the shell contract suite proves stale-launcher rewrite for Bash and includes a PowerShell execution test when `pwsh` or `powershell` is available
+- Primary remaining risk: future live-doc drift still requires periodic audits, but the validator now checks live behavior and shell helpers in addition to wording-only contracts

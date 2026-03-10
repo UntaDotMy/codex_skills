@@ -98,8 +98,54 @@ function Ensure-ManagedRepositoryClone {
     }
 }
 
+function Sync-ExternalBootstrapScriptCopy {
+    param(
+        [string]$ExternalScriptPath,
+        [string]$ManagedScriptPath
+    )
+
+    if (-not $ExternalScriptPath -or -not (Test-Path $ExternalScriptPath) -or -not (Test-Path $ManagedScriptPath)) {
+        return
+    }
+
+    if ([System.IO.Path]::GetFullPath($ExternalScriptPath) -eq [System.IO.Path]::GetFullPath($ManagedScriptPath)) {
+        return
+    }
+
+    $externalHash = (Get-FileHash -Algorithm SHA256 $ExternalScriptPath).Hash
+    $managedHash = (Get-FileHash -Algorithm SHA256 $ManagedScriptPath).Hash
+    if ($externalHash -eq $managedHash) {
+        return
+    }
+
+    $temporaryScriptPath = "$ExternalScriptPath.codex-refresh.tmp"
+    try {
+        Copy-Item -Path $ManagedScriptPath -Destination $temporaryScriptPath -Force
+        Move-Item -Path $temporaryScriptPath -Destination $ExternalScriptPath -Force
+        Write-Host "[INFO] Refreshed standalone entry script from managed clone: $ExternalScriptPath"
+    } catch {
+        if (Test-Path $temporaryScriptPath) {
+            Remove-Item -Force $temporaryScriptPath
+        }
+        Write-Host "[INFO] Managed clone is newer, but the standalone entry script could not be refreshed automatically: $ExternalScriptPath"
+    }
+}
+
+function Refresh-BootstrapEntryScriptFromRepo {
+    param([string]$CurrentScriptRoot)
+
+    $externalScriptPath = $env:CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH
+    if (-not $externalScriptPath) {
+        return
+    }
+
+    $managedScriptPath = Join-Path $CurrentScriptRoot (Split-Path -Leaf $externalScriptPath)
+    Sync-ExternalBootstrapScriptCopy -ExternalScriptPath $externalScriptPath -ManagedScriptPath $managedScriptPath
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not (Test-RepositoryLayoutComplete -RepositoryPath $scriptRoot)) {
+    $env:CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH = $MyInvocation.MyCommand.Path
     Ensure-BootstrapGitAvailable
 
     $repositoryUrl = if ($env:CODEX_SKILLS_REPOSITORY_URL) { $env:CODEX_SKILLS_REPOSITORY_URL } else { $defaultRepositoryUrl }
@@ -118,6 +164,7 @@ if (-not (Test-RepositoryLayoutComplete -RepositoryPath $scriptRoot)) {
     & $delegateScriptPath @ArgumentList
     exit $LASTEXITCODE
 }
+Refresh-BootstrapEntryScriptFromRepo -CurrentScriptRoot $scriptRoot
 $gitBashCandidates = @(
     (Join-Path $env:ProgramFiles "Git\\bin\\bash.exe"),
     (Join-Path $env:ProgramW6432 "Git\\bin\\bash.exe"),
@@ -137,4 +184,5 @@ if (-not (Test-Path $bashScriptPath)) {
 }
 
 & $gitBashPath $bashScriptPath @ArgumentList
+Refresh-BootstrapEntryScriptFromRepo -CurrentScriptRoot $scriptRoot
 exit $LASTEXITCODE

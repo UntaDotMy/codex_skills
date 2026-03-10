@@ -25,6 +25,8 @@ bash ./sync-skills.sh menu
 bash ./sync-skills.sh github-update
 ```
 
+The one-file bootstrap copy now refreshes itself from the managed clone whenever it is writable, so the downloaded entry script does not stay stale after later repo updates.
+
 #### Windows PowerShell
 
 ```powershell
@@ -39,6 +41,8 @@ Keep using the same file after that:
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 github-update
 ```
+
+The one-file bootstrap copy now refreshes itself from the managed clone whenever it is writable, so the downloaded entry script does not stay stale after later repo updates.
 
 Bootstrap environment overrides:
 
@@ -155,6 +159,8 @@ powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
 
 If you launched from a one-file bootstrap copy, the script keeps using the managed clone at `~/.codex-skill-pack-repos/codex_skills` by default, so `menu` and `github-update` keep working without a fresh manual clone step.
 
+When that bootstrap file is writable, the managed clone also refreshes the downloaded entry script on later runs so your saved launcher stays aligned with the latest bootstrap logic.
+
 The interactive manager now handles all of the following in one place:
 
 - install the full repo-managed skill pack
@@ -188,6 +194,7 @@ The GitHub updater is intentionally conservative:
 - it only pulls with `--ff-only`
 - it stops if the local branch is already ahead of the tracked remote
 - it aborts on divergence so local work is never silently overwritten
+- when launched from a one-file bootstrap copy, it also refreshes that external launcher from the managed clone when the file is writable
 
 ## Directory Structure
 

@@ -9,9 +9,10 @@ This file provides guidance for Codex CLI on when to use skills and multi-agent 
 ### Default Behavior
 
 When no skill is explicitly mentioned:
-1. Start with `reviewer` skill for triage
-2. Route to specialist skills if needed based on task type
-3. Return to `reviewer` for final quality check
+1. Route directly to the primary domain skill when the task clearly belongs to one surface
+2. Use `software-development-life-cycle` when the work is mainly sequencing, cross-domain planning, or architecture framing
+3. Start with `reviewer` only for audits, production-readiness checks, explicit gap-finding, or final validation
+4. Return to `reviewer` for the final quality check when a separate implementation skill owned the work
 
 ### Specialist Skills
 
@@ -133,6 +134,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 **Before research, planning, or implementation:**
 - Translate the raw user prompt into a concrete working brief.
 - Identify the user story, desired outcome, constraints, non-goals, acceptance criteria, edge cases, and validation plan.
+- For tooling, installers, updaters, CLIs, or operational workflows, include lifecycle scenarios in that brief: first run, repeat run, update path, stale bootstrap entrypoint, partial or interrupted state, rollback, and local-dirty recovery.
 - Strengthen vague prompts from repository evidence, runtime evidence, and prior memory before acting.
 - If business logic is still ambiguous after that pass, clarify with the user instead of drifting into guesses.
 - When delegating, include this working brief in the handoff so sub-agents are aligned and not vague.
@@ -205,6 +207,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 - Which explicit working brief or user story is being implemented
 - How it will be validated
 - What could go wrong
+- Which non-happy-path scenarios must still work, especially install, update, retry, partial-state repair, rollback, and stale-entrypoint recovery for tooling flows
 - Which files will be modified
 
 **Exit criteria:**

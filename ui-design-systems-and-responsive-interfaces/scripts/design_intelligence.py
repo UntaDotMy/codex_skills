@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,15 @@ class CatalogEntry:
     display_name: str
     keywords: list[str]
     payload: dict[str, Any]
+
+
+@dataclass
+class EntrySelection:
+    entry: CatalogEntry
+    total_score: int
+    matched_keywords: list[str]
+    display_match: bool
+    preferred_match: bool
 
 
 @dataclass
@@ -34,6 +44,157 @@ class DesignRecommendation:
     professional_polish_checks: list[str]
     recovery_checks: list[str]
     anti_patterns: list[str]
+    needs_clarification: bool
+    clarification_reason: str | None
+    selection_signals: dict[str, Any]
+
+
+GENERIC_PRODUCT_MATCH_TOKENS = {
+    "app",
+    "product",
+    "mobile",
+    "web",
+    "desktop",
+    "site",
+    "platform",
+    "tool",
+    "interface",
+}
+
+MOBILE_STACK_IDENTIFIERS = {"flutter-mobile", "react-native-mobile"}
+
+PRODUCT_BRIEF_HINTS: dict[str, dict[str, Any]] = {
+    "saas-dashboard": {
+        "target_user": "operator or team member monitoring work",
+        "trigger": "opening the product to inspect status, triage issues, or complete an operational task",
+        "primary_surface_model": "overview plus focused task panels",
+        "critical_failure_modes": [
+            "core status is buried under decoration",
+            "important actions compete with each other",
+            "dense data loses scanability under narrow widths",
+        ],
+    },
+    "marketing-landing": {
+        "target_user": "prospective customer evaluating the offer",
+        "trigger": "arriving from a campaign, search result, or referral",
+        "primary_surface_model": "hero plus proof and conversion rhythm",
+        "critical_failure_modes": [
+            "the first screen does not explain the offer quickly",
+            "proof and reassurance appear too late",
+            "competing calls to action slow commitment",
+        ],
+    },
+    "fintech-product": {
+        "target_user": "account holder making a high-trust financial decision",
+        "trigger": "checking status, moving money, or approving a sensitive action",
+        "primary_surface_model": "status summary plus guarded action flow",
+        "critical_failure_modes": [
+            "security or fee implications are unclear",
+            "high-risk actions are not visually distinct",
+            "error recovery weakens trust at commitment moments",
+        ],
+    },
+    "healthcare-service": {
+        "target_user": "person seeking care or managing a healthcare task",
+        "trigger": "starting or resuming a care-related action that benefits from reassurance",
+        "primary_surface_model": "guided service flow with clear next step and support cues",
+        "critical_failure_modes": [
+            "language increases anxiety instead of reducing it",
+            "forms ask for information without enough context",
+            "recovery paths after interruption are unclear",
+        ],
+    },
+    "ecommerce-storefront": {
+        "target_user": "shopper evaluating or purchasing an item",
+        "trigger": "arriving to compare, choose, or complete a purchase",
+        "primary_surface_model": "catalog or product detail plus purchase path",
+        "critical_failure_modes": [
+            "pricing and trust signals are fragmented",
+            "primary purchase actions lose visual dominance",
+            "checkout interruptions cause lost momentum",
+        ],
+    },
+    "portfolio-showcase": {
+        "target_user": "visitor evaluating the creator or firm",
+        "trigger": "arriving to assess quality, fit, and credibility",
+        "primary_surface_model": "proof-led narrative with one contact or booking path",
+        "critical_failure_modes": [
+            "visual effects overpower the work itself",
+            "proof lacks structure or pacing",
+            "the contact path is unclear",
+        ],
+    },
+    "education-platform": {
+        "target_user": "learner advancing to the next study step",
+        "trigger": "returning to continue progress or complete a learning task",
+        "primary_surface_model": "guided content flow with visible progress",
+        "critical_failure_modes": [
+            "the next step is unclear",
+            "content becomes a wall of text without pacing",
+            "progress or recovery cues disappear after interruption",
+        ],
+    },
+    "productivity-tool": {
+        "target_user": "person organizing or completing work",
+        "trigger": "opening the product to resume a task with minimal friction",
+        "primary_surface_model": "current task plus lightweight context and quick actions",
+        "critical_failure_modes": [
+            "too many quick actions compete for attention",
+            "status context is hidden until after navigation",
+            "empty states do not point toward a useful next step",
+        ],
+    },
+    "ai-workspace": {
+        "target_user": "person supervising or refining assisted output",
+        "trigger": "reviewing generated work and deciding what to approve, edit, or retry",
+        "primary_surface_model": "assistant output plus trust and control cues",
+        "critical_failure_modes": [
+            "outputs appear without enough control or source context",
+            "novelty styling outruns trust-building cues",
+            "the next safe action is unclear after an error or partial result",
+        ],
+    },
+    "developer-tool": {
+        "target_user": "developer or operator resolving a technical task",
+        "trigger": "opening the product to inspect state, logs, or diffs under time pressure",
+        "primary_surface_model": "high-signal task pane with explicit system state",
+        "critical_failure_modes": [
+            "status hierarchy is weak in dense views",
+            "destructive actions blend into ordinary controls",
+            "navigation adds friction before the user reaches the active problem",
+        ],
+    },
+    "marketplace-platform": {
+        "target_user": "buyer or seller comparing offers",
+        "trigger": "searching, filtering, or choosing between offers with trade-offs",
+        "primary_surface_model": "discovery list plus comparison and transaction cues",
+        "critical_failure_modes": [
+            "important price or availability signals are buried",
+            "comparison criteria are hard to retain across screens",
+            "trust proof is absent at transaction moments",
+        ],
+    },
+    "mobile-companion": {
+        "target_user": "person resuming a lightweight recurring task",
+        "trigger": "opening the product quickly on a small screen and expecting continuity",
+        "primary_surface_model": "single-thumb primary action plus clear history or progress",
+        "critical_failure_modes": [
+            "desktop-style density appears on a small screen",
+            "the keyboard or system chrome obscures the main action",
+            "the flow loses context after an interruption",
+        ],
+    },
+    "messaging-product": {
+        "target_user": "person resuming or sending a conversation",
+        "trigger": "opening the product to scan conversations, read updates, or send a reply",
+        "primary_surface_model": "conversation list plus active thread plus persistent composer",
+        "critical_failure_modes": [
+            "the user cannot tell which thread needs attention first",
+            "send, retry, or delivery state is unclear",
+            "drafts, attachments, or scroll position are lost across interruption",
+        ],
+    },
+}
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -105,25 +266,52 @@ def choose_entry(
     query_tokens: set[str],
     explicit_identifier: str | None = None,
     preferred_identifiers: list[str] | None = None,
-) -> CatalogEntry:
+    demoted_keywords: set[str] | None = None,
+) -> EntrySelection:
     if explicit_identifier is not None:
         for entry in entries:
             if entry.identifier == explicit_identifier:
-                return entry
+                matched_keywords = sorted(query_tokens & set(entry.keywords))
+                return EntrySelection(
+                    entry=entry,
+                    total_score=len(matched_keywords) + 5,
+                    matched_keywords=matched_keywords,
+                    display_match=bool(tokenize_text(entry.display_name) & query_tokens),
+                    preferred_match=False,
+                )
         raise ValueError(f"Unknown identifier: {explicit_identifier}")
 
-    best_entry = entries[0]
+    best_selection = EntrySelection(
+        entry=entries[0],
+        total_score=-1,
+        matched_keywords=[],
+        display_match=False,
+        preferred_match=False,
+    )
     best_score = -1
     preferred_set = set(preferred_identifiers or [])
+    demoted_keyword_set = demoted_keywords or set()
     for entry in entries:
-        keyword_score = len(query_tokens & set(entry.keywords))
-        preferred_bonus = 2 if entry.identifier in preferred_set else 0
-        display_bonus = 1 if tokenize_text(entry.display_name) & query_tokens else 0
+        matched_keywords = sorted(query_tokens & set(entry.keywords))
+        meaningful_matches = [
+            keyword for keyword in matched_keywords if keyword not in demoted_keyword_set
+        ]
+        display_match = bool(tokenize_text(entry.display_name) & query_tokens)
+        preferred_match = entry.identifier in preferred_set
+        keyword_score = len(meaningful_matches) * 2
+        preferred_bonus = 2 if preferred_match else 0
+        display_bonus = 1 if display_match else 0
         total_score = keyword_score + preferred_bonus + display_bonus
         if total_score > best_score:
-            best_entry = entry
+            best_selection = EntrySelection(
+                entry=entry,
+                total_score=total_score,
+                matched_keywords=matched_keywords,
+                display_match=display_match,
+                preferred_match=preferred_match,
+            )
             best_score = total_score
-    return best_entry
+    return best_selection
 
 
 def normalize_identifier(value: str | None) -> str:
@@ -206,9 +394,95 @@ def build_stack_adaptation_guidance(
     return list(dict.fromkeys(stack_adaptation_guidance))
 
 
+def infer_platform_surface(
+    requested_platform: str,
+    query_tokens: set[str],
+    stack_profile: CatalogEntry | None,
+) -> str:
+    normalized_requested_platform = normalize_identifier(requested_platform)
+    if normalized_requested_platform and normalized_requested_platform != "web":
+        return requested_platform
+
+    if stack_profile is not None and stack_profile.identifier in MOBILE_STACK_IDENTIFIERS:
+        return "mobile"
+
+    if query_tokens & {"mobile", "ios", "android", "iphone", "ipad"}:
+        return "mobile"
+
+    if query_tokens & {"desktop", "macos", "windows", "linux"}:
+        return "desktop"
+
+    return requested_platform
+
+
+def build_brief_hints(product_archetype: CatalogEntry) -> dict[str, Any]:
+    return PRODUCT_BRIEF_HINTS.get(
+        product_archetype.identifier,
+        {
+            "target_user": "person completing the product's primary task",
+            "trigger": "arriving to complete a task with minimal friction",
+            "primary_surface_model": "one strong primary workflow with supporting context",
+            "critical_failure_modes": [
+                "the primary task is hard to find",
+                "the next safe action is unclear",
+                "the interface loses progress after interruption",
+            ],
+        },
+    )
+
+
+def build_benchmark_strategy(product_archetype: CatalogEntry) -> list[str]:
+    return [
+        f"Benchmark mature {product_archetype.display_name.lower()} references that users in this category already understand.",
+        "Pair those product-family references with one mature design-system source to keep components and states reusable.",
+        "Use one accessibility-forward reference to verify hierarchy, focus, contrast, and recovery behavior.",
+    ]
+
+
+def build_selection_signals(
+    product_selection: EntrySelection,
+    style_selection: EntrySelection,
+    color_selection: EntrySelection,
+    typography_selection: EntrySelection,
+    stack_profile: CatalogEntry | None,
+) -> dict[str, Any]:
+    meaningful_product_matches = [
+        token for token in product_selection.matched_keywords if token not in GENERIC_PRODUCT_MATCH_TOKENS
+    ]
+    return {
+        "product_archetype": {
+            "identifier": product_selection.entry.identifier,
+            "score": product_selection.total_score,
+            "matched_keywords": product_selection.matched_keywords,
+            "meaningful_matched_keywords": meaningful_product_matches,
+            "display_match": product_selection.display_match,
+        },
+        "style_family": {
+            "identifier": style_selection.entry.identifier,
+            "score": style_selection.total_score,
+            "matched_keywords": style_selection.matched_keywords,
+            "preferred_match": style_selection.preferred_match,
+        },
+        "color_mood": {
+            "identifier": color_selection.entry.identifier,
+            "score": color_selection.total_score,
+            "matched_keywords": color_selection.matched_keywords,
+            "preferred_match": color_selection.preferred_match,
+        },
+        "typography_mood": {
+            "identifier": typography_selection.entry.identifier,
+            "score": typography_selection.total_score,
+            "matched_keywords": typography_selection.matched_keywords,
+            "preferred_match": typography_selection.preferred_match,
+        },
+        "stack_profile": stack_profile.identifier if stack_profile is not None else None,
+    }
+
+
 def build_professional_polish_checks(
     platform: str,
     stack_profile: CatalogEntry | None,
+    product_archetype: CatalogEntry,
 ) -> list[str]:
     professional_polish_checks = [
         "Use one product-grade icon family; avoid emoji or novelty icons in core product UI.",
@@ -228,6 +502,8 @@ def build_professional_polish_checks(
         professional_polish_checks.append(
             "Protect fixed headers, sticky actions, and dense table or card layouts from overlap, clipping, or unreadable compression."
         )
+
+    professional_polish_checks.extend(product_archetype.payload.get("professional_polish_checks", []))
 
     return professional_polish_checks
 
@@ -253,7 +529,26 @@ def build_recovery_checks(
             "Recover gracefully from interrupted sessions, keyboard dismissal, and connectivity changes without dumping the user back to the start."
         )
 
+    recovery_checks.extend(product_archetype.payload.get("recovery_checks", []))
+
     return recovery_checks
+
+
+def build_verification_loop(
+    platform: str,
+    product_archetype: CatalogEntry,
+    stack_profile: CatalogEntry | None,
+) -> list[str]:
+    verification_loop = [
+        "Verify primary CTA clarity, hierarchy, and outcome specificity.",
+        "Check default, hover, focus, active, disabled, loading, empty, error, and success states in isolation.",
+        "Run responsive and theme checks on the dominant surface before approving the full page.",
+        "Confirm brownfield changes preserve trusted navigation, language, and proven component behavior.",
+    ]
+    verification_loop.extend(product_archetype.payload.get("verification_checks", []))
+    if stack_profile is not None:
+        verification_loop.extend(stack_profile.payload.get("validation_checks", []))
+    return verification_loop
 
 
 def build_design_intelligence_packet(
@@ -266,8 +561,12 @@ def build_design_intelligence_packet(
     color_mood: CatalogEntry,
     typography_mood: CatalogEntry,
     stack_profile: CatalogEntry | None,
+    selection_signals: dict[str, Any],
 ) -> dict[str, Any]:
+    brief_hints = build_brief_hints(product_archetype)
+    benchmark_strategy = build_benchmark_strategy(product_archetype)
     benchmark_direction = [
+        benchmark_strategy[0],
         f"Use {style_family.display_name} as the dominant design-system family.",
         f"Ground palette decisions in {color_mood.display_name}.",
         f"Use {typography_mood.display_name} to drive hierarchy and readability.",
@@ -281,6 +580,11 @@ def build_design_intelligence_packet(
         "product_type": product_archetype.display_name,
         "platform_surface": platform,
         "primary_user_story": query,
+        "target_user": brief_hints["target_user"],
+        "trigger": brief_hints["trigger"],
+        "primary_goal": query,
+        "primary_surface_model": brief_hints["primary_surface_model"],
+        "critical_failure_modes": brief_hints["critical_failure_modes"],
         "trust_posture": product_archetype.payload["trust_posture"],
         "content_priorities": product_archetype.payload["content_priorities"],
         "style_family": style_family.display_name,
@@ -291,7 +595,9 @@ def build_design_intelligence_packet(
         "component_library": component_library or "existing system or custom",
         "stack": stack or "unspecified",
         "stack_profile": stack_profile.display_name if stack_profile is not None else "generic delivery constraints",
+        "benchmark_strategy": benchmark_strategy,
         "benchmark_direction": benchmark_direction,
+        "selection_signals": selection_signals,
     }
 
 
@@ -310,55 +616,71 @@ def build_recommendation(arguments: argparse.Namespace) -> DesignRecommendation:
         arguments.stack,
     )
 
-    product_archetype = choose_entry(
+    product_selection = choose_entry(
         catalog["product_archetypes"],
         query_tokens,
         explicit_identifier=arguments.product_archetype,
+        demoted_keywords=GENERIC_PRODUCT_MATCH_TOKENS,
     )
-    style_family = choose_entry(
+    resolved_platform = infer_platform_surface(
+        requested_platform=arguments.platform,
+        query_tokens=query_tokens,
+        stack_profile=stack_profile,
+    )
+    style_selection = choose_entry(
         catalog["style_families"],
         query_tokens,
         explicit_identifier=arguments.style_family,
         preferred_identifiers=merge_preferred_identifiers(
-            product_archetype.payload.get("recommended_style_families", []),
+            product_selection.entry.payload.get("recommended_style_families", []),
             stack_profile.payload.get("preferred_style_families", []) if stack_profile is not None else [],
         ),
     )
-    color_mood = choose_entry(
+    color_selection = choose_entry(
         catalog["color_moods"],
         query_tokens,
         explicit_identifier=arguments.color_mood,
         preferred_identifiers=merge_preferred_identifiers(
-            product_archetype.payload.get("recommended_color_moods", []),
+            product_selection.entry.payload.get("recommended_color_moods", []),
             stack_profile.payload.get("preferred_color_moods", []) if stack_profile is not None else [],
         ),
     )
-    typography_mood = choose_entry(
+    typography_selection = choose_entry(
         catalog["typography_moods"],
         query_tokens,
         explicit_identifier=arguments.typography_mood,
         preferred_identifiers=merge_preferred_identifiers(
-            product_archetype.payload.get("recommended_typography_moods", []),
+            product_selection.entry.payload.get("recommended_typography_moods", []),
             stack_profile.payload.get("preferred_typography_moods", []) if stack_profile is not None else [],
         ),
     )
 
+    selection_signals = build_selection_signals(
+        product_selection=product_selection,
+        style_selection=style_selection,
+        color_selection=color_selection,
+        typography_selection=typography_selection,
+        stack_profile=stack_profile,
+    )
+    needs_clarification = not selection_signals["product_archetype"]["meaningful_matched_keywords"]
+    clarification_reason = None
+    if needs_clarification:
+        clarification_reason = (
+            "The request does not yet contain enough surface-specific detail to safely infer the product family. Clarify the core workflow, dominant surface, or user task before trusting the recommendation."
+        )
+
     anti_patterns = list(dict.fromkeys(
-        product_archetype.payload.get("anti_patterns", []) + style_family.payload.get("anti_patterns", [])
+        product_selection.entry.payload.get("anti_patterns", []) + style_selection.entry.payload.get("anti_patterns", [])
     ))
     stack_adaptation_guidance = build_stack_adaptation_guidance(
-        platform=arguments.platform,
+        platform=resolved_platform,
         component_library=arguments.component_library,
         stack_profile=stack_profile,
     )
-    verification_loop = [
-        "Verify primary CTA clarity, hierarchy, and outcome specificity.",
-        "Check default, hover, focus, active, disabled, loading, empty, error, and success states in isolation.",
-        "Run responsive and theme checks on the dominant surface before approving the full page.",
-        "Confirm brownfield changes preserve trusted navigation, language, and proven component behavior.",
-    ]
-    verification_loop.extend(
-        stack_profile.payload.get("validation_checks", []) if stack_profile is not None else []
+    verification_loop = build_verification_loop(
+        platform=resolved_platform,
+        product_archetype=product_selection.entry,
+        stack_profile=stack_profile,
     )
     brownfield_defaults = [
         "Audit what already works before redesigning.",
@@ -367,35 +689,37 @@ def build_recommendation(arguments: argparse.Namespace) -> DesignRecommendation:
         "Persist the system as MASTER plus optional page overrides when team alignment needs it.",
     ]
     professional_polish_checks = build_professional_polish_checks(
-        platform=arguments.platform,
+        platform=resolved_platform,
         stack_profile=stack_profile,
+        product_archetype=product_selection.entry,
     )
     recovery_checks = build_recovery_checks(
-        platform=arguments.platform,
-        product_archetype=product_archetype,
+        platform=resolved_platform,
+        product_archetype=product_selection.entry,
     )
 
     packet = build_design_intelligence_packet(
         query=arguments.query,
-        platform=arguments.platform,
+        platform=resolved_platform,
         stack=arguments.stack,
         component_library=arguments.component_library,
-        product_archetype=product_archetype,
-        style_family=style_family,
-        color_mood=color_mood,
-        typography_mood=typography_mood,
+        product_archetype=product_selection.entry,
+        style_family=style_selection.entry,
+        color_mood=color_selection.entry,
+        typography_mood=typography_selection.entry,
         stack_profile=stack_profile,
+        selection_signals=selection_signals,
     )
 
     return DesignRecommendation(
         query=arguments.query,
-        platform=arguments.platform,
+        platform=resolved_platform,
         stack=arguments.stack,
         component_library=arguments.component_library,
-        product_archetype=product_archetype.payload,
-        style_family=style_family.payload,
-        color_mood=color_mood.payload,
-        typography_mood=typography_mood.payload,
+        product_archetype=product_selection.entry.payload,
+        style_family=style_selection.entry.payload,
+        color_mood=color_selection.entry.payload,
+        typography_mood=typography_selection.entry.payload,
         stack_profile=stack_profile.payload if stack_profile is not None else None,
         design_intelligence_packet=packet,
         stack_adaptation_guidance=stack_adaptation_guidance,
@@ -404,6 +728,9 @@ def build_recommendation(arguments: argparse.Namespace) -> DesignRecommendation:
         professional_polish_checks=professional_polish_checks,
         recovery_checks=recovery_checks,
         anti_patterns=anti_patterns,
+        needs_clarification=needs_clarification,
+        clarification_reason=clarification_reason,
+        selection_signals=selection_signals,
     )
 
 
@@ -439,9 +766,21 @@ def render_markdown(recommendation: DesignRecommendation) -> str:
         f"- Stack: {packet['stack']}",
         f"- Component library: {packet['component_library']}",
         "",
+        "## Brief Hardening",
+        f"- Target user: {packet['target_user']}",
+        f"- Trigger: {packet['trigger']}",
+        f"- Primary goal: {packet['primary_goal']}",
+        f"- Primary surface model: {packet['primary_surface_model']}",
+        "",
         "## Content Priorities",
     ]
     lines.extend(f"- {priority}" for priority in packet["content_priorities"])
+    lines.extend(["", "## Critical Failure Modes"])
+    lines.extend(f"- {item}" for item in packet["critical_failure_modes"])
+    lines.extend(["", "## Benchmark Strategy"])
+    lines.extend(f"- {item}" for item in packet["benchmark_strategy"])
+    if recommendation.needs_clarification and recommendation.clarification_reason:
+        lines.extend(["", "## Clarification Needed", f"- {recommendation.clarification_reason}"])
     lines.extend([
         "",
         "## Recommended System",
@@ -451,6 +790,11 @@ def render_markdown(recommendation: DesignRecommendation) -> str:
         f"- Typography mood: {recommendation.typography_mood['display_name']} — {recommendation.typography_mood['direction']}",
         f"- Stack profile: {packet['stack_profile']}",
         f"- CTA guidance: {recommendation.product_archetype['cta_guidance']}",
+        "",
+        "## Selection Signals",
+        f"- Product archetype score: {recommendation.selection_signals['product_archetype']['score']}",
+        f"- Product archetype matches: {', '.join(recommendation.selection_signals['product_archetype']['matched_keywords']) or 'none'}",
+        f"- Style family matches: {', '.join(recommendation.selection_signals['style_family']['matched_keywords']) or 'none'}",
         "",
         "## Stack Adaptation",
     ])
@@ -471,6 +815,42 @@ def render_markdown(recommendation: DesignRecommendation) -> str:
     return "\n".join(lines)
 
 
+def build_clarification_payload(recommendation: DesignRecommendation) -> dict[str, Any]:
+    return {
+        "query": recommendation.query,
+        "platform": recommendation.platform,
+        "stack": recommendation.stack,
+        "component_library": recommendation.component_library,
+        "needs_clarification": recommendation.needs_clarification,
+        "clarification_reason": recommendation.clarification_reason,
+        "requested_brief_fields": [
+            "target user",
+            "dominant workflow",
+            "primary surface",
+            "success state",
+            "failure and recovery expectations",
+        ],
+        "selection_signals": recommendation.selection_signals,
+    }
+
+
+def render_clarification_markdown(recommendation: DesignRecommendation) -> str:
+    clarification_payload = build_clarification_payload(recommendation)
+    lines = [
+        "# Clarification Needed",
+        "",
+        f"- Query: {clarification_payload['query']}",
+        f"- Platform surface: {clarification_payload['platform']}",
+        f"- Reason: {clarification_payload['clarification_reason']}",
+        f"- Tentative product-family match: {clarification_payload['selection_signals']['product_archetype']['identifier']}",
+        f"- Tentative match keywords: {', '.join(clarification_payload['selection_signals']['product_archetype']['matched_keywords']) or 'none'}",
+        "",
+        "## Add Before Re-running",
+    ]
+    lines.extend(f"- {item}" for item in clarification_payload["requested_brief_fields"])
+    return "\n".join(lines)
+
+
 def render_compact(recommendation: DesignRecommendation) -> str:
     packet = recommendation.design_intelligence_packet
     return (
@@ -479,7 +859,7 @@ def render_compact(recommendation: DesignRecommendation) -> str:
         f"color={recommendation.color_mood['display_name']} | "
         f"type={recommendation.typography_mood['display_name']} | "
         f"trust={packet['trust_posture']} | density={packet['density']} | "
-        f"stack={packet['stack_profile']}"
+        f"stack={packet['stack_profile']} | clarify={'yes' if recommendation.needs_clarification else 'no'}"
     )
 
 
@@ -521,6 +901,16 @@ def persist_recommendation(
 
 
 def emit_output(recommendation: DesignRecommendation, output_format: str) -> str:
+    if recommendation.needs_clarification:
+        clarification_payload = build_clarification_payload(recommendation)
+        if output_format == "json":
+            return json.dumps(clarification_payload, indent=2)
+        if output_format == "compact":
+            return (
+                f"Clarification Needed | top={clarification_payload['selection_signals']['product_archetype']['identifier']} | "
+                f"platform={clarification_payload['platform']}"
+            )
+        return render_clarification_markdown(recommendation)
     if output_format == "json":
         return json.dumps(asdict(recommendation), indent=2)
     if output_format == "compact":
@@ -535,6 +925,12 @@ def main() -> int:
     print(rendered_output)
 
     if arguments.persist:
+        if recommendation.needs_clarification:
+            print(
+                "Cannot persist a low-confidence design recommendation. Clarify the core workflow, dominant surface, and user task first.",
+                file=sys.stderr,
+            )
+            return 1
         persisted_paths = persist_recommendation(
             recommendation=recommendation,
             output_directory=arguments.output_dir,

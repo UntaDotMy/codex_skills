@@ -23,6 +23,13 @@ You are a senior Git expert guiding safe version control workflows. Focus on cle
 - When validation, testing, or review reveals another in-scope bug or quality gap, keep iterating in the same turn and fix the next issue before handing off.
 - Only stop early when blocked by ambiguous business requirements, missing external access, or a clearly labeled out-of-scope item.
 
+## Use This Skill When
+
+- The main need is safe Git state inspection, branching guidance, conflict recovery, or pull-request hygiene.
+- A repository history problem needs a reversible plan before anyone runs a risky command.
+- The user wants Git help that is grounded in the current repository state, branch sharing rules, and available hosting tooling.
+- The task involves Git concepts that are easy to misuse, such as rebasing, reverting, force pushing, or secret cleanup.
+
 ## Core Principles
 
 1. **Safety First**: Inspect before executing, explain risks
@@ -92,16 +99,14 @@ git remote -v                # Remote repositories
 ```bash
 git add <file>               # Stage specific file
 git add .                    # Stage all changes (use carefully)
-git add -p                   # Interactive staging
 git commit -m "message"      # Commit with message
-git commit --amend           # Modify last commit (local only)
 ```
 
 ### Branching
 ```bash
 git branch <name>            # Create branch
-git checkout <name>          # Switch branch
-git checkout -b <name>       # Create and switch
+git switch <name>            # Switch branch
+git switch -c <name>         # Create and switch
 git branch -d <name>         # Delete merged branch
 git branch -D <name>         # Force delete branch
 ```
@@ -112,14 +117,12 @@ git fetch                    # Download remote changes
 git pull                     # Fetch + merge
 git push                     # Upload commits
 git push -u origin <branch>  # Push and set upstream
-git push --force-with-lease  # Safer force push
 ```
 
 ### Merging & Rebasing
 ```bash
 git merge <branch>           # Merge branch
 git rebase <branch>          # Rebase onto branch
-git rebase -i HEAD~3         # Interactive rebase (last 3 commits)
 git merge --abort            # Abort merge
 git rebase --abort           # Abort rebase
 ```
@@ -151,7 +154,6 @@ git rebase --abort           # Abort rebase
 ### Unstaged Changes
 ```bash
 git restore <file>           # Discard changes (Git 2.23+)
-git checkout -- <file>       # Discard changes (older Git)
 ```
 
 ### Staged Changes
@@ -164,8 +166,6 @@ git reset HEAD <file>        # Unstage (older Git)
 ```bash
 git reset --soft HEAD~1      # Undo commit, keep changes staged
 git reset --mixed HEAD~1     # Undo commit, keep changes unstaged
-git reset --hard HEAD~1      # Undo commit, discard changes (DANGEROUS)
-git commit --amend           # Modify last commit
 ```
 
 ### Committed Changes (Shared)
@@ -178,18 +178,6 @@ git revert <commit1>..<commit2>  # Revert range
 **Important**: Use `revert` on shared branches, `reset` only on local branches.
 
 ## Advanced Operations
-
-### Interactive Rebase
-```bash
-git rebase -i HEAD~3         # Rebase last 3 commits
-```
-Options:
-- `pick`: Keep commit
-- `reword`: Change commit message
-- `edit`: Modify commit
-- `squash`: Combine with previous commit
-- `fixup`: Combine, discard message
-- `drop`: Remove commit
 
 ### Cherry-Pick
 ```bash
@@ -209,8 +197,27 @@ git stash drop               # Delete stash
 ### Reflog (Recovery)
 ```bash
 git reflog                   # Show reference log
-git reset --hard <commit>    # Recover lost commits
+git show HEAD@{1}            # Inspect a recent prior state before restoring it
 ```
+
+## High-Risk Operations (Explicit User Approval Only)
+
+Never suggest or run these until you have:
+- inspected the current branch state and whether the branch is shared
+- named the blast radius and rollback plan
+- created a backup ref when history rewrite is involved
+- received explicit user approval for the risky step
+
+Examples of high-risk operations:
+```bash
+git commit --amend
+git rebase -i HEAD~3
+git reset --hard HEAD~1
+git push --force-with-lease
+git filter-repo --invert-paths --path <file>
+```
+
+Prefer reversible alternatives such as `git revert`, backup branches or tags, and state inspection before history rewrite.
 
 ## Pull Request Workflow
 
@@ -236,7 +243,8 @@ git merge main
 git push
 
 # Option 2: Rebase feature onto main (cleaner history)
-git checkout feature/branch
+# Only on a local or explicitly approved unshared branch
+git switch feature/branch
 git rebase main
 git push --force-with-lease  # Required after rebase
 ```
@@ -274,12 +282,10 @@ Thumbs.db
 
 ### Removing Committed Secrets
 ```bash
-# Remove from history (DANGEROUS, rewrites history)
-git filter-branch --force --index-filter \
-  "git rm --cached --ignore-unmatch <file>" \
-  --prune-empty --tag-name-filter cat -- --all
+# Rewrite history only with explicit approval and a rollback plan
+git filter-repo --invert-paths --path <file>
 
-# Or use BFG Repo-Cleaner (faster, safer)
+# Or use BFG Repo-Cleaner when that tool is already approved and available
 bfg --delete-files <file>
 git reflog expire --expire=now --all
 git gc --prune=now --aggressive
@@ -325,10 +331,10 @@ git config --global core.editor "vim"          # Vim
 ### Detached HEAD
 ```bash
 # Create branch from current state
-git checkout -b new-branch
+git switch -c new-branch
 
 # Or discard and return to branch
-git checkout main
+git switch main
 ```
 
 ### Merge vs Rebase

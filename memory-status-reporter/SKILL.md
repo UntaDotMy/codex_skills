@@ -91,6 +91,12 @@ Always produce these sections unless the user narrows the scope:
 - Do not claim a rewarded pattern unless the artifacts show a validated win, a clear reuse success, or durable guidance that future work should prefer.
 - Do not claim research-cache reuse or staleness unless the artifacts actually record that update.
 
+## Real-World Scenarios
+
+- **Daily Delivery Check-In**: A user asks what Codex learned today, what mistakes were resolved, and whether momentum is improving; use this skill to turn raw memory into a concise status report.
+- **Repeated Failure Pattern**: Similar tool or workflow failures keep resurfacing; use this skill to surface the mistake trail, current resolution state, and the prevention pattern future runs should follow.
+- **Preference Recall Audit**: A user wants confirmation that Codex still remembers their working style, validation expectations, and recurring project constraints; use this skill to summarize those remembered needs without inventing new ones.
+
 ## References
 
 - `references/reporting-rubric.md` for metric definitions and status thresholds
