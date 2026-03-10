@@ -45,6 +45,8 @@
 - ISO 9241-11 catalog entry: https://www.iso.org/standard/63500.html
 - NN/g usability heuristics: https://www.nngroup.com/articles/ten-usability-heuristics/
 - Jakob's Law overview: https://lawsofux.com/jakobs-law/
+- Material Design 3 content design overview: https://m3.material.io/foundations/content-design/overview
+- Baymard Institute articles: https://baymard.com/blog
 
 ## Curated Inspiration and Pattern Discovery
 

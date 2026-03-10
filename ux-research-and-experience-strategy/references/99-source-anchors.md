@@ -33,6 +33,8 @@
 - Atlassian Design System: https://atlassian.design/
 - GitHub Primer: https://primer.style/
 - Shopify Polaris: https://shopify.dev/docs/apps/design-guidelines
+- Material Design 3 content design overview: https://m3.material.io/foundations/content-design/overview
+- Baymard Institute articles: https://baymard.com/blog
 
 ## Curated Inspiration and Pattern Discovery
 

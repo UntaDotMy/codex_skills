@@ -1256,6 +1256,14 @@ validate_codex_skill_dir() {
                 print_error "UI skill is missing the expected depth in design-intelligence or brownfield defaults"
                 return 1
             fi
+            if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "UI Copy and Flow Defaults" 6; then
+                print_error "UI skill is missing concise-copy and flow defaults"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "UI Copy and Flow Defaults" "helper text only" "filler copy" "obvious next action"; then
+                print_error "UI skill is missing concise-copy guardrails"
+                return 1
+            fi
             if ! grep -q "Storybook, Ladle, or Histoire" "$skill_dir/SKILL.md"; then
                 print_error "UI skill is missing component-verification defaults"
                 return 1
@@ -1280,6 +1288,14 @@ validate_codex_skill_dir() {
         ux-research-and-experience-strategy)
             if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Experience Brief Defaults" 5 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Brownfield Redesign and Artifact Persistence" 4; then
                 print_error "UX skill is missing the expected depth in experience-brief or brownfield defaults"
+                return 1
+            fi
+            if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Flow-First UX Defaults" 6; then
+                print_error "UX skill is missing flow-first delivery defaults"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Flow-First UX Defaults" "supporting sentence under every heading" "helper text only" "filler"; then
+                print_error "UX skill is missing concise-writing guardrails"
                 return 1
             fi
             if ! grep -q "Storybook, Ladle, Histoire" "$skill_dir/SKILL.md"; then

@@ -302,6 +302,32 @@ When producing UX guidance, avoid vague recommendations and make the work implem
 - Short paragraphs
 - Scannable content
 
+## Flow-First UX Defaults
+
+Prefer simpler flow over more explanation:
+- cut steps, choices, and fields before adding more copy
+- keep one clear next step on each screen or section
+- group related decisions so users do not scan the same page twice
+- keep form questions close to the input they affect
+- use progressive disclosure only when it reduces overload, not to hide core decisions
+- preserve progress across validation, auth, payment, or connectivity interruptions
+- keep recovery nearby: users should not have to hunt for retry, edit, or back actions
+
+Keep product language practical:
+- default to short page titles, labels, and button text
+- avoid adding a supporting sentence under every heading
+- use helper text only when it prevents a likely mistake or answers a trust question
+- prefer familiar category language over invented feature names
+- avoid clever, chatty, or promotional copy in task-heavy flows
+- if a section is clear without extra text, do not add filler
+
+Use concise UX writing rules in recommendations:
+- headings should identify the task, not explain the whole screen
+- CTA text should describe the result
+- warning and confirmation text should answer the user's likely risk in one pass
+- empty states should point to the next useful action, not just describe absence
+- success states should confirm what happened and what users can do next
+
 ## Decision Confidence and Recovery Checks
 
 Use these concrete checks before approving UX recommendations:

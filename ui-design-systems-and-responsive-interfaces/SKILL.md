@@ -87,6 +87,35 @@ When producing UI guidance, provide concrete design direction rather than vague 
 - Call out anti-patterns that would make the result look generic, fragile, or off-brand.
 - Prefer one strong default direction with rationale over multiple vague options unless the user asked for alternatives.
 
+## UI Copy and Flow Defaults
+
+Keep UI language short and useful:
+- prefer short labels over descriptive slogans
+- default to 1-4 word headings and direct button text
+- use helper text only when the next action, requirement, or consequence is not obvious
+- avoid adding a descriptive sentence under every heading by default
+- do not narrate the interface with lines that sound generated, promotional, or overly clever
+- if a heading already makes the action clear, leave it alone instead of adding filler copy
+- use verbs for actions and nouns for navigation
+- say what happens next: `Save draft`, `Create report`, `Send invite`, `Retry payment`
+- keep destructive or high-trust actions explicit: `Delete workspace`, `Pay now`, `Share publicly`
+- prefer familiar product language that users already know in that category
+
+Treat flow as more important than decorative copy:
+- remove steps before adding explanation
+- keep one main action per area
+- place supporting text near the field, toggle, or decision it explains
+- if users need repeated explanation, simplify the layout, labels, or defaults first
+- break long setup and forms into short grouped steps when the task has distinct decisions
+- preserve momentum with visible progress, saved state, and clear recovery paths
+- keep dashboards and dense tools scannable: short labels, stable layout, obvious filters, obvious next action
+
+Before finalizing, prune copy aggressively:
+- remove any sentence that does not change a decision, reduce an error, build trust, or improve comprehension
+- replace abstract section intros with concrete labels
+- turn multi-sentence helper text into bullets only when users truly need stepwise guidance
+- if the interface still feels wordy, cut text before adding more styling
+
 ## Brownfield Redesign Defaults
 
 - Treat existing branding, proven user flows, and reusable components as assets to audit before replacing them.
