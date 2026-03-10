@@ -89,6 +89,8 @@ MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- Strengthen vague prompts from repository, runtime, and memory evidence before acting; if business logic remains ambiguous, clarify instead of drifting."
     "- For code work, prefer test-first when practical by starting with a failing test or executable acceptance check before implementation."
     "- Keep researching during implementation whenever APIs, tools, edge cases, or best practices are uncertain; do not trust stale memory alone."
+    "- When validation, testing, or review reveals another in-scope bug or quality gap, keep iterating in the same turn and fix the next issue before handing off; only stop early when blocked by ambiguity, external access limits, or a clearly labeled out-of-scope item."
+    "- Before starting a fresh research loop, check local memory and any freshness-aware research cache for a matching reusable finding; reuse it when the recorded freshness still fits the task, and only go to live external research for what is missing, stale, uncertain, or explicitly time-sensitive."
     "- Use a context retrieval ladder to save tokens: exact file or symbol search first, then targeted snippets, then full-file reads only for the files you will edit or directly depend on."
     "- Prefer surgical patches and modular edits: change only impacted ranges, keep stable prefixes for cache reuse, and avoid rewriting whole files when a targeted patch is sufficient."
     "- Prefer modular structure: keep entrypoints thin, move named logic into focused files, and separate backend, API, frontend, workers, and tests when the project spans those concerns."
@@ -110,6 +112,25 @@ config_has_required_memory_status_lines() {
     done
 
     return 0
+}
+
+config_has_any_memory_status_lines() {
+    local config_file=$1
+    local required_line
+
+    [[ -f "$config_file" ]] || return 1
+
+    if grep -q "^\[agents\.memory-status-reporter\]" "$config_file"; then
+        return 0
+    fi
+
+    for required_line in "${MEMORY_STATUS_REQUIRED_CONFIG_LINES[@]}"; do
+        if grep -qF -- "$required_line" "$config_file"; then
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 # Function to print colored output
@@ -343,9 +364,10 @@ run_items_in_parallel() {
     local worker_limit=$1
     shift
     local worker_items=("$@")
-    local active_job_count=0
+    local active_job_pids=()
     local overall_result=0
     local worker_item
+    local completed_job_pid
 
     if [[ ${#worker_items[@]} -eq 0 ]]; then
         return 0
@@ -353,20 +375,20 @@ run_items_in_parallel() {
 
     for worker_item in "${worker_items[@]}"; do
         "$worker_function_name" "$worker_item" &
-        ((active_job_count+=1))
-        if [[ $active_job_count -ge $worker_limit ]]; then
-            if ! wait -n; then
+        active_job_pids+=("$!")
+        if [[ ${#active_job_pids[@]} -ge $worker_limit ]]; then
+            completed_job_pid="${active_job_pids[0]}"
+            if ! wait "$completed_job_pid"; then
                 overall_result=1
             fi
-            ((active_job_count-=1))
+            active_job_pids=("${active_job_pids[@]:1}")
         fi
     done
 
-    while [[ $active_job_count -gt 0 ]]; do
-        if ! wait -n; then
+    for completed_job_pid in "${active_job_pids[@]}"; do
+        if ! wait "$completed_job_pid"; then
             overall_result=1
         fi
-        ((active_job_count-=1))
     done
 
     return $overall_result
@@ -382,8 +404,20 @@ list_repo_skill_directories() {
     done | LC_ALL=C sort
 }
 
+populate_array_from_command() {
+    local array_name=$1
+    shift
+    local item
+
+    eval "$array_name=()"
+    while IFS= read -r item; do
+        [[ -n "$item" ]] || continue
+        eval "$array_name+=(\"\$item\")"
+    done < <("$@")
+}
+
 repo_skill_directories_array() {
-    mapfile -t REPO_SKILL_DIRECTORIES < <(list_repo_skill_directories)
+    populate_array_from_command REPO_SKILL_DIRECTORIES list_repo_skill_directories
 }
 
 PARALLEL_VALIDATION_STATUS_DIRECTORY=""
@@ -485,6 +519,35 @@ skill_manager_metadata_file() {
     printf '%s/install-metadata.txt\n' "$(skill_manager_state_directory)"
 }
 
+pack_has_repo_managed_files() {
+    local installed_skill_name
+
+    if [[ -f "$CODEX_TARGET/AGENTS.md" ]] || [[ -f "$CODEX_TARGET/00-skill-routing-and-escalation.md" ]]; then
+        return 0
+    fi
+
+    if [[ -f "$CODEX_TARGET/agents/memory-status-reporter.toml" ]] || config_has_any_memory_status_lines "$CODEX_TARGET/config.toml"; then
+        return 0
+    fi
+
+    while IFS= read -r installed_skill_name; do
+        [[ -n "$installed_skill_name" ]] || continue
+        if [[ -d "$CODEX_TARGET/skills/$installed_skill_name" ]]; then
+            return 0
+        fi
+    done < <(list_repo_skill_names)
+
+    return 1
+}
+
+pack_is_installed() {
+    if [[ -f "$(skill_manager_metadata_file)" ]] || [[ -f "$(managed_skill_inventory_file)" ]] || [[ -f "$(managed_home_agent_inventory_file)" ]]; then
+        return 0
+    fi
+
+    pack_has_repo_managed_files
+}
+
 ensure_skill_manager_state_directories() {
     mkdir -p "$(skill_manager_manifest_directory)/source"
     mkdir -p "$(skill_manager_manifest_directory)/target"
@@ -503,7 +566,89 @@ get_installed_version() {
         return 0
     fi
 
+    if ! pack_is_installed; then
+        echo "not installed"
+        return 0
+    fi
+
     echo "unknown"
+}
+
+git_repository_available() {
+    command -v git >/dev/null 2>&1 && git -C "$CODEX_SOURCE" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
+git_remote_url_for_name() {
+    local remote_name=$1
+    git -C "$CODEX_SOURCE" remote get-url "$remote_name" 2>/dev/null || true
+}
+
+git_current_branch() {
+    git -C "$CODEX_SOURCE" rev-parse --abbrev-ref HEAD 2>/dev/null || true
+}
+
+git_upstream_ref() {
+    git -C "$CODEX_SOURCE" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true
+}
+
+git_default_remote_head_ref() {
+    git -C "$CODEX_SOURCE" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true
+}
+
+git_resolve_update_source_ref() {
+    local upstream_ref
+    local current_branch
+    local remote_head_ref
+
+    upstream_ref="$(git_upstream_ref)"
+    if [[ -n "$upstream_ref" ]]; then
+        printf '%s\n' "$upstream_ref"
+        return 0
+    fi
+
+    current_branch="$(git_current_branch)"
+    if [[ -n "$current_branch" ]] && git -C "$CODEX_SOURCE" show-ref --verify --quiet "refs/remotes/origin/$current_branch"; then
+        printf 'origin/%s\n' "$current_branch"
+        return 0
+    fi
+
+    remote_head_ref="$(git_default_remote_head_ref)"
+    if [[ -n "$remote_head_ref" ]]; then
+        printf '%s\n' "$remote_head_ref"
+        return 0
+    fi
+
+    return 1
+}
+
+git_worktree_is_clean() {
+    [[ -z "$(git -C "$CODEX_SOURCE" status --porcelain 2>/dev/null)" ]]
+}
+
+git_update_relationship() {
+    local update_ref=$1
+    local local_commit
+    local remote_commit
+    local merge_base
+
+    local_commit="$(git -C "$CODEX_SOURCE" rev-parse HEAD 2>/dev/null || true)"
+    remote_commit="$(git -C "$CODEX_SOURCE" rev-parse "$update_ref" 2>/dev/null || true)"
+    merge_base="$(git -C "$CODEX_SOURCE" merge-base HEAD "$update_ref" 2>/dev/null || true)"
+
+    if [[ -z "$local_commit" ]] || [[ -z "$remote_commit" ]] || [[ -z "$merge_base" ]]; then
+        printf 'unknown\n'
+        return 0
+    fi
+
+    if [[ "$local_commit" == "$remote_commit" ]]; then
+        printf 'up_to_date\n'
+    elif [[ "$merge_base" == "$local_commit" ]]; then
+        printf 'behind\n'
+    elif [[ "$merge_base" == "$remote_commit" ]]; then
+        printf 'ahead\n'
+    else
+        printf 'diverged\n'
+    fi
 }
 
 write_install_metadata() {
@@ -821,11 +966,11 @@ list_repo_skill_names() {
 }
 
 repo_skill_names_array() {
-    mapfile -t REPO_SKILL_NAMES < <(list_repo_skill_names)
+    populate_array_from_command REPO_SKILL_NAMES list_repo_skill_names
 }
 
 installed_skill_names_array() {
-    mapfile -t INSTALLED_SKILL_NAMES < <(list_installed_skill_names)
+    populate_array_from_command INSTALLED_SKILL_NAMES list_installed_skill_names
 }
 
 list_installed_skill_names() {
@@ -934,11 +1079,17 @@ verify_pack_checksums() {
     local skill_name
     local failed_checksum_skill_name
 
+    if ! pack_is_installed; then
+        print_error "Codex skill pack is not installed in Codex home: $CODEX_TARGET"
+        return 1
+    fi
+
     run_task_line "verify root files" verify_root_file_checksum "AGENTS.md" || failed=1
     run_task_line "verify root routing" verify_root_file_checksum "00-skill-routing-and-escalation.md" || failed=1
 
     while IFS= read -r failed_checksum_skill_name; do
         [[ -n "$failed_checksum_skill_name" ]] || continue
+        print_error "MD5 verification failed for installed skill: $failed_checksum_skill_name"
         failed=1
     done < <(collect_failed_checksum_skill_names_parallel)
 
@@ -1081,6 +1232,8 @@ skill_has_required_runtime_guidance() {
     file_contains_all_patterns "$file_path" \
         'js_repl' \
         'codex\.tool' \
+        'research-cache|research cache|freshness-aware' \
+        'keep iterating in the same turn' \
         'terminal state before finalizing|wait[^\n]*required sub-agent' \
         'Do not close a required running sub-agent|forbid closing a running required sub-agent early' \
         'keep at most one live same-role agent' \
@@ -1099,6 +1252,9 @@ agent_config_has_required_runtime_guidance() {
         'js_repl' \
         'codex\.tool' \
         'Always research current external information before trusting internal knowledge' \
+        'freshness-aware research cache' \
+        'missing, stale, uncertain, or explicitly time-sensitive|missing, stale, uncertain, or time-sensitive' \
+        'keep iterating in the same turn' \
         'terminal state before finalizing|wait[^\n]*required sub-agent' \
         'Do not close a required running sub-agent|forbid closing a running required sub-agent early' \
         'keep at most one live same-role agent' \
@@ -1457,6 +1613,16 @@ validate_codex_guidance_file() {
             return 1
         fi
 
+        if ! grep -qi "skip redundant live research" "$file" || ! grep -qi "missing, uncertain, stale, or explicitly time-sensitive parts" "$file"; then
+            print_error "Missing cache-first research-reuse gate in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "Do not stop at the first bug uncovered by validation" "$file"; then
+            print_error "Missing validation autonomy rule in AGENTS.md"
+            return 1
+        fi
+
         if ! grep -qi "maintain a lightweight per-project spawned-agent list" "$file"; then
             print_error "Missing spawned-agent registry policy in AGENTS.md"
             return 1
@@ -1489,8 +1655,22 @@ validate_codex_guidance_file() {
     fi
 
     if [[ "$(basename "$file")" == "README.md" ]]; then
-        if ! grep -qi "Research cache" "$file" || ! grep -qi "Reinforcement memory" "$file" || ! grep -qi "rewarded patterns" "$file"; then
-            print_error "Missing research-cache or reinforcement-memory workflow in README.md"
+        if ! grep -qi "Research cache" "$file" || ! grep -qi "Reinforcement memory" "$file" || ! grep -qi "rewarded patterns" "$file" || ! grep -qi "github-update" "$file" || ! grep -qi "skip redundant live research" "$file"; then
+            print_error "Missing research-cache, GitHub update, or reinforcement-memory workflow in README.md"
+            return 1
+        fi
+    fi
+
+    if [[ "$(basename "$file")" == "00-skill-routing-and-escalation.md" ]]; then
+        if ! grep -qi "Reuse Fresh Research First" "$file" || ! grep -qi "Fix The Next Bug Too" "$file"; then
+            print_error "Missing cache-first or autonomy routing defaults in 00-skill-routing-and-escalation.md"
+            return 1
+        fi
+    fi
+
+    if [[ "$(basename "$file")" == "VALIDATION_REPORT.md" ]]; then
+        if ! grep -qi "github-update" "$file" || ! grep -qi "cache-first research gate" "$file" || ! grep -qi "keep-iterating completion rule" "$file"; then
+            print_error "Missing GitHub update, cache-first, or autonomy hardening evidence in VALIDATION_REPORT.md"
             return 1
         fi
     fi
@@ -1933,6 +2113,7 @@ validate_all() {
 
     while IFS= read -r failed_skill_name; do
         [[ -n "$failed_skill_name" ]] || continue
+        print_error "Validation failed for skill: $failed_skill_name"
         ((failed+=1))
     done < <(collect_failed_skill_names_parallel)
 
@@ -2056,6 +2237,13 @@ show_checksum_status() {
     local changed_skills=()
     local removed_skills=()
     local skill_name
+
+    if ! pack_is_installed; then
+        echo "  core file checksum status: not installed"
+        echo "  skill checksum status: not installed"
+        echo "  stale managed skills: none"
+        return 0
+    fi
 
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
@@ -2214,6 +2402,68 @@ install_codex() {
     run_task_line "install to $CODEX_TARGET" sync_codex
 }
 
+update_codex_from_github() {
+    local update_ref
+    local remote_name
+    local remote_branch
+    local relationship
+    local remote_url
+
+    if ! ensure_sync_runtime_prerequisites; then
+        print_error "Runtime prerequisites failed, aborting GitHub update"
+        return 1
+    fi
+
+    if ! git_repository_available; then
+        print_error "GitHub update requires $CODEX_SOURCE to be a Git repository"
+        return 1
+    fi
+
+    if ! git_worktree_is_clean; then
+        print_error "Repository has local changes. Commit, stash, or discard them before running github-update."
+        return 1
+    fi
+
+    update_ref="$(git_resolve_update_source_ref)" || {
+        print_error "No upstream tracking branch or origin default branch was found. Configure a remote branch before running github-update."
+        return 1
+    }
+
+    remote_name="${update_ref%%/*}"
+    remote_branch="${update_ref#*/}"
+    remote_url="$(git_remote_url_for_name "$remote_name")"
+    if [[ -z "$remote_url" ]]; then
+        print_error "No remote URL is configured for $remote_name in $CODEX_SOURCE"
+        return 1
+    fi
+
+    run_task_line "fetch $remote_name" git -C "$CODEX_SOURCE" fetch --prune "$remote_name" || return 1
+
+    relationship="$(git_update_relationship "$update_ref")"
+    case "$relationship" in
+        up_to_date)
+            print_success "Repository already matches $update_ref"
+            ;;
+        behind)
+            run_task_line "pull $update_ref" git -C "$CODEX_SOURCE" pull --ff-only "$remote_name" "$remote_branch" || return 1
+            ;;
+        ahead)
+            print_error "Repository is ahead of $update_ref. Use ./sync-skills.sh update for local-only sync, or push/reset before running github-update."
+            return 1
+            ;;
+        diverged)
+            print_error "Repository diverged from $update_ref. Reconcile the branch before running github-update."
+            return 1
+            ;;
+        *)
+            print_error "Unable to compare the repo with $update_ref after fetch"
+            return 1
+            ;;
+    esac
+
+    update_codex
+}
+
 update_codex() {
     local changed_skills=()
     local removed_skills=()
@@ -2223,6 +2473,12 @@ update_codex() {
     if ! ensure_sync_runtime_prerequisites; then
         print_error "Runtime prerequisites failed, aborting update"
         return 1
+    fi
+
+    if ! pack_is_installed; then
+        print_info "No installed Codex skill pack was found in $CODEX_TARGET; running install instead of delta update"
+        install_codex
+        return $?
     fi
 
     run_task_line "validate" validate_all || return 1
@@ -2243,7 +2499,8 @@ update_codex() {
 
     if [[ "$root_files_changed" == "false" ]] && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]]; then
         print_success "Installed skill pack is already up to date"
-        verify_pack_checksums
+        verify_pack_checksums || return 1
+        write_install_metadata || return 1
         return 0
     fi
 
@@ -2255,7 +2512,7 @@ choose_installed_skill_interactively() {
     local installed_skills=()
     local selected_skill
 
-    mapfile -t installed_skills < <(list_installed_skill_names)
+    populate_array_from_command installed_skills list_installed_skill_names
     if [[ ${#installed_skills[@]} -eq 0 ]]; then
         print_warning "No installed skills were found in $CODEX_TARGET/skills"
         return 1
@@ -2296,6 +2553,7 @@ run_interactive_menu() {
         print_menu_option "i"  "install"
         print_menu_option "s"  "sync"
         print_menu_option "u"  "update"
+        print_menu_option "g"  "github-update"
         print_menu_option "r"  "remove"
         print_menu_option "v"  "verify"
         print_menu_option "st" "status"
@@ -2316,6 +2574,11 @@ run_interactive_menu() {
                 ;;
             u|update|3)
                 update_codex
+                ;;
+            g|github-update|upgrade|8)
+                if prompt_yes_no "Fetch the latest repo changes from GitHub and sync them into $CODEX_TARGET?"; then
+                    update_codex_from_github
+                fi
                 ;;
             r|remove|4)
                 print_menu_option "1" "remove one installed skill"
@@ -2382,6 +2645,21 @@ show_status() {
     echo "  Platform: $PLATFORM_NAME"
     echo "  Repo version: $(get_repo_version)"
     echo "  Installed version: $(get_installed_version)"
+    if git_repository_available; then
+        local git_remote_name
+        local git_remote_url
+        local git_update_source
+        git_update_source="$(git_resolve_update_source_ref || true)"
+        git_remote_name="${git_update_source%%/*}"
+        if [[ -n "$git_remote_name" ]] && [[ "$git_remote_name" != "$git_update_source" ]]; then
+            git_remote_url="$(git_remote_url_for_name "$git_remote_name")"
+        fi
+        echo "  Git remote: ${git_remote_url:-not configured}"
+        echo "  Git update source: ${git_update_source:-not configured}"
+    else
+        echo "  Git remote: unavailable"
+        echo "  Git update source: unavailable"
+    fi
 
     local codex_source_count=0
     local codex_synced_count=0
@@ -2430,7 +2708,7 @@ show_status() {
 
     if [[ -f "$CODEX_TARGET/config.toml" ]] && grep -q "^\[agents\.memory-status-reporter\]" "$CODEX_TARGET/config.toml" && config_has_required_memory_status_lines "$CODEX_TARGET/config.toml"; then
         echo "  memory-status-reporter config: synced"
-    elif [[ -f "$CODEX_TARGET/config.toml" ]]; then
+    elif config_has_any_memory_status_lines "$CODEX_TARGET/config.toml"; then
         echo "  memory-status-reporter config: partial"
     else
         echo "  memory-status-reporter config: missing"
@@ -2454,13 +2732,14 @@ show_status() {
 
 # Main script
 show_usage() {
-    echo "Usage: $0 {menu|install|i|sync|s|codex|update|u|remove|uninstall|verify|v|validate|status|st|all}"
+    echo "Usage: $0 {menu|install|i|sync|s|codex|update|u|github-update|gu|upgrade|remove|uninstall|verify|v|validate|status|st|all}"
     echo ""
     echo "Commands:"
     echo "  menu              - Open the interactive installer and management menu"
     echo "  install | i       - Validate, sync, and verify the skill pack"
     echo "  sync | s | codex  - Force-sync the skill pack and verify the result"
-    echo "  update | u        - Check for update and refresh changed repo-managed files"
+    echo "  update | u        - Refresh changed repo-managed files from the current local clone"
+    echo "  github-update | gu | upgrade - Fetch the latest repo changes, fast-forward the clone, then sync changed files"
     echo "  remove            - Remove the full repo-managed skill pack"
     echo "  uninstall         - Alias for remove"
     echo "  remove <skill>    - Remove one installed skill by name"
@@ -2490,6 +2769,9 @@ main() {
             ;;
         update|u)
             update_codex
+            ;;
+        github-update|gu|upgrade)
+            update_codex_from_github
             ;;
         remove|uninstall)
             if [[ -n "${2:-}" ]]; then

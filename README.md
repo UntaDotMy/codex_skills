@@ -67,6 +67,7 @@ After installation, you can immediately use the manager and verification flow:
 
 ```bash
 ./sync-skills.sh menu
+./sync-skills.sh github-update
 ./sync-skills.sh verify
 ./sync-skills.sh status
 ```
@@ -75,6 +76,7 @@ On Windows PowerShell, use the wrapper:
 
 ```powershell
 ./sync-skills.ps1 menu
+./sync-skills.ps1 github-update
 ./sync-skills.ps1 verify
 ./sync-skills.ps1 status
 ```
@@ -89,7 +91,7 @@ On Windows PowerShell, use the wrapper:
 
 ### Interactive Manager
 
-Use the same script in interactive mode when you want install, sync, update, remove, verify, and status in one menu:
+Use the same script in interactive mode when you want install, sync, update, GitHub refresh, remove, verify, and status in one menu:
 
 ```bash
 ./sync-skills.sh menu
@@ -106,11 +108,34 @@ The interactive manager now handles all of the following in one place:
 - install the full repo-managed skill pack
 - force-sync the skill pack
 - detect drift with MD5 and apply only the required repo-managed changes
+- fetch the latest upstream repo changes with a safe fast-forward-only GitHub update
 - remove one installed skill or the full repo-managed pack
 - verify copied files with MD5 checksums
 - detect repo and installed versions
 - detect stale or old installed files before refresh
 - prune repo-managed skills that were removed from the source repository
+
+### GitHub Updates
+
+Use local `update` when you already changed the clone on disk and only want to sync those repo-managed changes into `~/.codex`.
+
+Use `github-update` when you want the menu or CLI to fetch the latest version from the tracked GitHub remote, fast-forward the local clone, and then sync only the changed files into Codex home:
+
+```bash
+./sync-skills.sh github-update
+```
+
+```powershell
+./sync-skills.ps1 github-update
+```
+
+The GitHub updater is intentionally conservative:
+
+- it requires a clean local working tree before pulling
+- it fetches the tracked upstream or the remote default branch
+- it only pulls with `--ff-only`
+- it stops if the local branch is already ahead of the tracked remote
+- it aborts on divergence so local work is never silently overwritten
 
 ## Directory Structure
 
@@ -255,6 +280,7 @@ The detailed research-backed version lives in `docs/context-efficiency-playbook.
 - reuse cached prefixes and small focused models for narrow classification or filtering work
 - separate working memory, episodic memory, and durable memory so you do not keep replaying everything
 - persist reusable research findings in a freshness-aware cache so future tasks can skip redundant research when prior findings are still valid
+- check the research cache before Round 1 and skip redundant live research when the freshness notes already cover the task
 
 ## Memory Growth Reporting
 
@@ -314,6 +340,8 @@ python3 ~/.codex/skills/memory-status-reporter/scripts/memory_status_report.py -
 
 The update command is a repo-managed delta update. It refreshes only changed skills and root files, then removes repo-managed skills that disappeared from the source tree.
 
+If the repo-managed skill pack is not installed in the target Codex home yet, both `update` and `github-update` now bootstrap a full install automatically instead of failing with a partial-state error.
+
 ### Uninstall Skills
 
 ```bash
@@ -325,6 +353,8 @@ To remove one installed skill only:
 ```bash
 ./sync-skills.sh uninstall reviewer
 ```
+
+`uninstall reviewer` removes that skill from the current Codex home immediately, but the next full-pack `install`, `sync`, `update`, or `github-update` restores any repo-managed skill that still exists in this repository. Use full-pack `uninstall` when you want the repo-managed install state to become fully absent.
 
 On Windows PowerShell, use:
 
@@ -387,6 +417,10 @@ Also verify `./sync-skills.sh status` reports full agent inheritance unless you 
 ### Windows install fails looking for `python3`
 
 The installer now probes `python3`, `python`, and `py -3` before editing Codex home. If install still fails, verify at least one of these commands launches Python 3 successfully from the same shell session.
+
+### GitHub update says the repo is dirty or diverged
+
+The new `github-update` command refuses to overwrite local work. If it stops, either commit your local changes, stash them, push them and use plain `./sync-skills.sh update`, or reset the clone to the upstream state you want, then rerun `./sync-skills.sh github-update`.
 
 ### Memory footer looks thin
 

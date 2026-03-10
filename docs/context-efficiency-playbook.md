@@ -48,6 +48,8 @@ Keep stable instructions and reusable setup text at the front of prompts, and ap
 
 Persist reusable research findings when they answer a non-trivial question correctly enough to change future work.
 
+Before you start a fresh live research loop, check indexed memory and any recorded research-cache entry for the same question first. If the cached finding is still within its freshness guidance and fully answers the need, reuse it and skip redundant live research. Only return to external search for the parts that are missing, stale, uncertain, or explicitly time-sensitive.
+
 Cache these items:
 
 - resolved API usage patterns and correct command sequences
@@ -117,7 +119,7 @@ Use the smallest acceptable step for classification, routing, candidate filterin
 
 - `AGENTS.md` requires a working brief before research or coding
 - `AGENTS.md` requires a context retrieval ladder before broad context loading
-- `sync-skills.sh` injects the shared execution-policy lines into `~/.codex/config.toml`
+- `sync-skills.sh` injects the shared execution-policy lines, including the cache-first research reuse gate, into `~/.codex/config.toml`
 - `memory-status-reporter/scripts/memory_status_report.py --format compact` provides the final-answer learning footer
 - `README.md` documents the setup and operational workflow
 

@@ -170,6 +170,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 - Continue researching during implementation whenever APIs, tools, edge cases, or best practices become uncertain.
 
 **Escalating Research Process:**
+- **Reuse Gate (Before Round 1):** Check indexed memory and any recorded research-cache entry for the same question first. If the cached result is still within its freshness guidance and fully answers the need, reuse it and skip redundant live research. Only return to live external research for the missing, uncertain, stale, or explicitly time-sensitive parts.
 - **Round 1 (Authoritative)**: Search the live web and official docs, official blogs, and official websites first. Treat internal knowledge as a starting hypothesis, not proof. If the answer is specific and accurate, stop here.
 - **Round 2 (Community/Issues)**: If R1 is too general, search Reddit, StackOverflow, and GitHub issues for practical implementations or known bugs.
 - **Round 3 (Broad)**: If R2 fails, search general forums, broader websites, and independent tech blogs.
@@ -188,6 +189,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 - **Main-Agent Responsibility:** Before non-trivial work, the main agent MUST read relevant memory. After non-trivial work, the main agent MUST consolidate durable learnings, rewarded patterns, penalty patterns, validation paths, and failure shields into persistent memory so future agents stay aligned. Sub-agents may discover learnings, but the main agent is responsible for writing the durable memory update.
 - **Tool Mistakes Count:** If a tool call fails or is misused in a way that teaches a reusable lesson, record the tool name, failure symptom, cause, verified fix, and prevention note in the rollout summary and durable memory.
 - **Freshness Rule:** Cache durable architecture guidance longer, but mark date-sensitive research, vendor behavior, pricing, version caveats, and workaround findings with freshness notes so they can be refreshed instead of trusted forever.
+- **Autonomy Rule:** Do not stop at the first bug uncovered by validation. If the next issue is in scope and fixable, keep iterating in the same turn until the flow is clean or truly blocked.
 - **Quality Bar:** Memory entries must be actionable, deduplicated, and specific enough to change future behavior; do not store vague conclusions.
 
 **Exit criteria:**

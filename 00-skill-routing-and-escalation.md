@@ -12,7 +12,9 @@ This document defines how skills should route to each other, when to escalate to
 6. **Use the Cheapest Useful Context First**: Start with exact file or symbol search, then targeted snippets, then full-file reads only when the edit scope requires it
 7. **Prefer Surgical Patches**: Keep stable context, patch only impacted ranges, and avoid rewriting untouched sections
 8. **Clarify Before Drift**: If product logic, acceptance criteria, or business intent remains ambiguous after repository and runtime evidence review, stop and ask instead of improvising
-9. **Completion Is Evidence-Based**: A skill should treat work as done only when the requested outcome, validation, and explicit runtime boundaries are all clear
+9. **Reuse Fresh Research First**: Check indexed memory and research-cache notes before starting a new live research loop, then research only the missing, stale, uncertain, or time-sensitive delta
+10. **Completion Is Evidence-Based**: A skill should treat work as done only when the requested outcome, validation, and explicit runtime boundaries are all clear
+11. **Fix The Next Bug Too**: When validation exposes another in-scope bug, keep iterating in the same turn instead of handing off after the first fix
 
 ## Routing Authority and Overlap Resolution
 
@@ -65,7 +67,9 @@ When multiple skills could plausibly apply, steer by decision ownership instead 
 
 ## Context Efficiency Defaults
 
-Use this ladder before loading large amounts of context:
+Use this ladder before loading large amounts of context and before starting a new research pass:
+
+- reuse fresh memory or research-cache findings first, then research only the missing delta
 
 1. **Working brief first** — translate the request into user story, outcome, constraints, acceptance criteria, and validation plan
 2. **Exact retrieval first** — use symbol, path, or keyword search to narrow the candidate files
