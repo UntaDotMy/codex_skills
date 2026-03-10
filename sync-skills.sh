@@ -2031,9 +2031,12 @@ run_repo_contract_tests() {
         "$CODEX_SOURCE/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py" \
         "$CODEX_SOURCE/tests/test_skill_pack_contracts.py" || return 1
 
-    run_python -m unittest \
-        "$CODEX_SOURCE/ui-design-systems-and-responsive-interfaces/tests/test_design_intelligence.py" \
-        "$CODEX_SOURCE/tests/test_skill_pack_contracts.py"
+    (
+        cd "$CODEX_SOURCE" || exit 1
+        run_python -m unittest \
+            ui-design-systems-and-responsive-interfaces/tests/test_design_intelligence.py \
+            tests/test_skill_pack_contracts.py
+    )
 }
 extract_codex_openai_value() {
     local openai_yaml_path=$1

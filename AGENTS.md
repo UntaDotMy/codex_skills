@@ -134,7 +134,8 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 **Before research, planning, or implementation:**
 - Translate the raw user prompt into a concrete working brief.
 - Identify the user story, desired outcome, constraints, non-goals, acceptance criteria, edge cases, and validation plan.
-- For tooling, installers, updaters, CLIs, or operational workflows, include lifecycle scenarios in that brief: first run, repeat run, update path, stale bootstrap entrypoint, partial or interrupted state, rollback, and local-dirty recovery.
+- For tooling, automation, CLIs, installers, updaters, or operational workflows, include the relevant lifecycle scenarios in that brief: first use, repeat use, upgrade path, interruption or partial state, rollback or recovery, and local-state conflicts where applicable.
+- For workflow validation, prove behavior from the execution contexts users actually depend on, not only from the source checkout.
 - Strengthen vague prompts from repository evidence, runtime evidence, and prior memory before acting.
 - If business logic is still ambiguous after that pass, clarify with the user instead of drifting into guesses.
 - When delegating, include this working brief in the handoff so sub-agents are aligned and not vague.
@@ -207,7 +208,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 - Which explicit working brief or user story is being implemented
 - How it will be validated
 - What could go wrong
-- Which non-happy-path scenarios must still work, especially install, update, retry, partial-state repair, rollback, and stale-entrypoint recovery for tooling flows
+- Which lifecycle and recovery scenarios must still work beyond the happy path, especially for tooling or operational flows
 - Which files will be modified
 
 **Exit criteria:**

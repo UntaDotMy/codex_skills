@@ -69,12 +69,16 @@ def write_sync_script_without_main(temp_directory: Path) -> Path:
     return sourced_script_path
 
 
-def run_bash(command: str, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run_bash(
+    command: str,
+    environment: dict[str, str] | None = None,
+    working_directory: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     runtime_environment = os.environ.copy()
     runtime_environment.update(environment or {})
     return subprocess.run(
         ["bash", "-lc", command],
-        cwd=REPOSITORY_ROOT,
+        cwd=working_directory or REPOSITORY_ROOT,
         check=False,
         capture_output=True,
         text=True,
@@ -189,11 +193,19 @@ class SkillPackContractTests(unittest.TestCase):
         root_guidance_text = read_text(REPOSITORY_ROOT / "AGENTS.md")
         software_skill_text = read_text(REPOSITORY_ROOT / "software-development-life-cycle" / "SKILL.md")
         reviewer_skill_text = read_text(REPOSITORY_ROOT / "reviewer" / "SKILL.md")
+        ui_skill_text = read_text(REPOSITORY_ROOT / "ui-design-systems-and-responsive-interfaces" / "SKILL.md")
+        ux_skill_text = read_text(REPOSITORY_ROOT / "ux-research-and-experience-strategy" / "SKILL.md")
 
-        self.assertIn("stale bootstrap entrypoint", root_guidance_text)
-        self.assertIn("non-happy-path scenarios", root_guidance_text)
+        self.assertIn("relevant lifecycle scenarios", root_guidance_text)
+        self.assertIn("execution contexts users actually depend on", root_guidance_text)
         self.assertIn("lifecycle scenario sweep", software_skill_text)
-        self.assertIn("happy-path-only validation", reviewer_skill_text)
+        self.assertIn("lifecycle, recovery, and local-state scenarios", reviewer_skill_text)
+        self.assertIn("continuity-heavy flows", ui_skill_text)
+        self.assertIn("continuity-heavy flows", ux_skill_text)
+        self.assertNotIn("for 1:1 messaging", ui_skill_text)
+        self.assertNotIn("for 1:1 messaging", ux_skill_text)
+        self.assertNotIn("Messaging Surface Rehabilitation", ui_skill_text)
+        self.assertNotIn("Messaging Familiarity Gap", ux_skill_text)
 
     def test_mobile_guidance_uses_keystore_for_android(self) -> None:
         mobile_text = read_text(REPOSITORY_ROOT / "mobile-development-life-cycle" / "SKILL.md")
@@ -321,6 +333,22 @@ class SkillPackContractTests(unittest.TestCase):
             0,
             completed_process.stdout + completed_process.stderr,
         )
+
+    def test_sync_validate_smoke_passes_from_absolute_script_path(self) -> None:
+        if os.environ.get("CODEX_SKIP_VALIDATE_SMOKE") == "1":
+            self.skipTest("Nested validate smoke intentionally skipped to avoid recursion.")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            completed_process = run_bash(
+                f'bash "{SYNC_SCRIPT_PATH}" validate',
+                environment={"CODEX_SKIP_VALIDATE_SMOKE": "1"},
+                working_directory=Path(temporary_directory),
+            )
+            self.assertEqual(
+                completed_process.returncode,
+                0,
+                completed_process.stdout + completed_process.stderr,
+            )
 
 
 if __name__ == "__main__":

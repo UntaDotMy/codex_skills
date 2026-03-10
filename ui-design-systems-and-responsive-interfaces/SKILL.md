@@ -70,15 +70,15 @@ Before proposing a visual direction, assemble a compact design intelligence pack
 
 Use this packet to recommend one strong default design system direction rather than a pile of disconnected aesthetics.
 
-## Product-Family and Messaging Defaults
+## Product-Family and Familiarity Defaults
 
 When the user references an existing product family or benchmark:
 - research the current product family and relevant platform guidance before proposing changes
 - name what should feel familiar to existing users and what is intentionally different
-- preserve the core mental model first: conversation list, active thread, stable composer, and clear delivery or recovery states
-- keep conversation surfaces calm: message content, timestamps, unread state, typing or presence cues, and attachment actions should outrank decorative chrome
-- prefer compact, product-native spacing and restrained theming over marketing cards, heavy gradients, or novelty motion
-- for 1:1 messaging, optimize for rapid scan, safe reply, draft preservation, keyboard safety, attachment clarity, and inline failed-send recovery
+- preserve the core mental model first: primary navigation landmarks, the active work surface, the main action area, and the state or recovery cues users depend on
+- keep task-critical content calm: the information users scan, the signals they act on, and the controls they need most should outrank decorative chrome
+- prefer compact, product-native spacing and restrained theming over unrelated marketing patterns, heavy gradients, or novelty motion
+- for continuity-heavy flows, optimize for rapid scan, safe action, preserved in-progress state, input ergonomics, and inline recovery when interruption or failure occurs
 - borrow transferable hierarchy and interaction rules, not brand assets or proprietary layouts one-to-one
 
 ## UI and UX Ownership Boundary
@@ -107,7 +107,7 @@ Adjust the recommendation to the actual surface instead of treating every reques
 - **Dashboards and data tools**: prioritize scanning, comparison, filter clarity, table legibility, sticky context, and low-noise emphasis for alerts and primary actions
 - **Marketing and landing pages**: lead with a strong hero, proof, offer framing, social trust, objection handling, and a repeated CTA rhythm without visual spam
 - **Onboarding and forms**: reduce cognitive load, chunk information, preserve progress, explain why fields matter, and make recovery obvious
-- **Messaging and inbox surfaces**: prioritize conversation-list scanability, thread continuity, stable composer behavior, delivery and read-state clarity, and keyboard-safe attachment actions
+- **Continuity-heavy or stateful collaboration surfaces**: prioritize scanability, stable primary actions, clear state transitions, preserved in-progress work, and interruption-safe recovery
 - **Mobile-first consumer flows**: design thumb-friendly actions, strong section separation, low-friction checkout or booking, and compressed but readable density
 - **Settings, admin, and enterprise surfaces**: favor calm hierarchy, explicit destructive-action handling, system-status visibility, and predictable navigation landmarks
 - **Empty, sparse, or early-stage products**: use a premium sparse layout only when the content supports it; otherwise add structure, proof, examples, or guided next steps so the UI does not feel unfinished
@@ -123,7 +123,7 @@ When producing UI guidance, provide concrete design direction rather than vague 
 - Explain mobile and desktop behavior, including what changes across breakpoints.
 - Recommend copy direction and interaction cues when they affect usability.
 - For known product families, state what should feel familiar to existing users and what must stay unique to the current product.
-- For messaging flows, specify the conversation list, thread, composer, delivery states, and failure-recovery behavior instead of treating the screen like a generic card layout.
+- For continuity-heavy or stateful flows, specify the primary collection view, active workspace, input or control surface, state transitions, and failure-recovery behavior instead of treating the screen like a generic card layout.
 - Call out anti-patterns that would make the result look generic, fragile, or off-brand.
 - Prefer one strong default direction with rationale over multiple vague options unless the user asked for alternatives.
 
@@ -182,8 +182,8 @@ python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.
 # Stack-aware recommendations for real implementation constraints
 python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "AI workspace for research copilots" --stack nextjs --component-library shadcn --format json
 
-# Messaging-oriented recommendation with mobile constraints
-python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "direct messaging mobile app with unread states and voice notes" --stack flutter --format json
+# Stateful mobile-workflow recommendation with resumable context
+python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py "mobile coordination workflow with unread states and resumable draft actions" --stack flutter --format json
 
 # Persist a master design system and a page-specific override safely
 python3 ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py \
@@ -477,7 +477,7 @@ Use single-agent for straightforward UI tasks or when changes need one coordinat
 - **Accessibility Before Launch**: A release candidate looks polished but has keyboard, contrast, or screen-reader gaps; use this skill to prioritize fixes by severity and user impact.
 - **Responsive Complexity**: A feature works on desktop but breaks under constrained layouts; use this skill to isolate token, layout, and interaction causes without overfitting one viewport.
 - **Brownfield Modernization**: A product has real users, existing branding, and a few painful surfaces; use this skill to preserve what still works, capture a master design direction, and modernize only the risky or outdated areas.
-- **Messaging Surface Rehabilitation**: A chat or inbox experience feels generic, cluttered, or unlike the product family users expect; use this skill to benchmark familiar conversation patterns and rebuild the list-thread-composer hierarchy without copying branding.
+- **Familiar Interaction Surface Rehabilitation**: A high-continuity surface feels generic, cluttered, or unlike the product family users expect; use this skill to benchmark the familiar interaction model and rebuild the core hierarchy without copying branding.
 
 ## Workflow
 
