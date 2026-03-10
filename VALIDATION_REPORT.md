@@ -1,12 +1,12 @@
 # Skills Validation Report
 
-**Date**: 2026-03-08  
-**Scope**: Codex-only audit of skill inventory, sync logic, repo guidance, memory-report wiring, and context-efficiency policy  
-**Status**: ✅ PASS AFTER REMEDIATION
+**Date**: 2026-03-10  
+**Scope**: Codex-only audit of skill inventory, sync logic, managed install lifecycle, repo guidance, memory-report wiring, and context-efficiency policy  
+**Status**: ✅ PASS AFTER INSTALLER HARDENING
 
 ## Executive Summary
 
-The repository is now aligned as a Codex-only skill pack. legacy mirror content is being removed, the sync workflow is focused on `~/.codex`, and the live home wiring now protects working-brief guidance, context-efficiency policy, modular-structure preferences, and compact memory snapshots in addition to the existing memory-status route.
+The repository is now aligned as a Codex-only skill pack. The sync workflow is focused on `~/.codex`, the live home wiring protects working-brief guidance, context-efficiency policy, modular-structure preferences, and compact memory snapshots, and the install lifecycle now behaves like a managed skill-pack installation instead of a loose copy.
 
 ## Live Inventory Snapshot
 
@@ -36,13 +36,18 @@ The repository is now aligned as a Codex-only skill pack. legacy mirror content 
 ### Sync Logic
 - `sync-skills.sh` is now Codex-only
 - The script detects macOS, Linux, and Windows shells and resolves Codex home accurately
+- The script now detects a working Python launcher (`python3`, `python`, or `py -3`) before mutating Codex home
 - The script syncs skills, root guidance, home agent TOMLs, and `memory-status-reporter` global config wiring
+- The script tracks repo-managed installed skills so update and uninstall can prune removed skills safely
+- The `update` command now applies a repo-managed delta refresh instead of always rerunning a full pack refresh
 - Status output checks the route line, the agent block, and the injected execution-policy markers before reporting `synced`
+- Status output now reports inheritance cleanly and no longer depends on model-specific helper overrides after stale reviewer-lane files are pruned
 
 ### Memory and Reporting
 - `memory-status-reporter` still reports learnings, mistakes, and tool-use mistakes
 - The memory report script now supports a compact footer mode for final-answer snapshots
 - Heuristic growth metrics remain clearly labeled as artifact-based estimates, not literal cognition
+- Repo-managed skill agents now inherit the workspace model and reasoning baseline, while built-in runtime roles still depend on runtime model-selection support
 
 ### Documentation
 - `README.md` is now a Codex-only setup and workflow guide
@@ -57,27 +62,40 @@ The repository is now aligned as a Codex-only skill pack. legacy mirror content 
 - Sync wiring now injects context-efficiency, surgical-patch, modular-structure, and learning-snapshot policy into `~/.codex/config.toml`
 - AGENTS guidance now requires a compact learning snapshot for non-trivial work when memory artifacts are available
 - Windows path detection now prefers `%USERPROFILE%\\.codex` and resolves it cleanly in Git Bash via `cygpath` when present
+- Windows now has a dedicated `sync-skills.ps1` wrapper so install, update, verify, and uninstall are callable from PowerShell
 
 ## Validation Commands
 
-Run from the repo root:
+Run from the repo root on macOS/Linux:
 
 ```bash
 ./sync-skills.sh validate
+./sync-skills.sh install
+./sync-skills.sh update
 ./sync-skills.sh status
-./sync-skills.sh codex --verify-only
 ```
 
-Optional full sync:
+Run from the repo root on Windows PowerShell:
+
+```powershell
+./sync-skills.ps1 validate
+./sync-skills.ps1 install
+./sync-skills.ps1 update
+./sync-skills.ps1 status
+```
+
+Optional verification or uninstall:
 
 ```bash
-./sync-skills.sh codex
+./sync-skills.sh verify
+./sync-skills.sh uninstall
 ```
 
 ## Current Conclusion
 
 - Codex inventory: accurate and complete at `12` skills
 - Sync scope: Codex-only and focused on `~/.codex`
+- Install lifecycle: managed install metadata, tracked repo-managed skills, explicit uninstall, and delta updates are now in place
 - Context-efficiency policy: documented, validator-backed, and wired into live config
 - Memory reporting: supports both full reports and compact learning snapshots
 - Primary remaining risk: literal-string validator drift if future wording changes without updating the checks

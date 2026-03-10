@@ -46,6 +46,12 @@
 - NN/g usability heuristics: https://www.nngroup.com/articles/ten-usability-heuristics/
 - Jakob's Law overview: https://lawsofux.com/jakobs-law/
 
+## Curated Inspiration and Pattern Discovery
+
+- Shoogle inspiration index: https://shoogle.dev/
+- Shoogle targeted pattern search example (`chart`): https://shoogle.dev/search?q=chart
+
 ## Notes
 
 - ISO standards are typically paywalled; use official catalog entries for normative reference and pair with public implementation guidance from W3C, platform docs, and design systems.
+- Treat Shoogle as a discovery source for visual and interaction references, not as a normative standard; validate borrowed patterns against accessibility, content, and product constraints.

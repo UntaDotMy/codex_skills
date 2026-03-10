@@ -129,6 +129,15 @@ Do not over-claim certainty when:
 - a cache, read replica, search index, or projection may lag the source of truth
 - a contract looks correct statically but integration partners or deployed versions were not verified
 
+## OpenAI-Aligned Delegation Defaults
+
+- Use **agents as tools** when one manager should keep control of the user-facing turn, combine specialist outputs, or enforce shared guardrails and final formatting.
+- Use **handoffs** when routing should transfer control so the selected specialist owns the rest of the turn directly.
+- Keep local runtime state, approvals, and dependencies separate from model-visible context unless they are intentionally exposed.
+- Prefer filtered history or concise handoff packets over replaying the full transcript by default.
+- Choose one conversation continuation strategy per thread unless there is an explicit reconciliation plan.
+- Preserve workflow names, trace metadata, and validation evidence for multi-agent backend investigations.
+
 ## Windows Execution Guidance
 
 - Route tool-assisted work through `js_repl` with `codex.tool(...)` first.

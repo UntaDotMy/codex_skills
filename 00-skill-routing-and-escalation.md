@@ -11,6 +11,18 @@ This document defines how skills should route to each other, when to escalate to
 5. **Avoid Circular Routing**: Don't create routing loops between skills
 6. **Use the Cheapest Useful Context First**: Start with exact file or symbol search, then targeted snippets, then full-file reads only when the edit scope requires it
 7. **Prefer Surgical Patches**: Keep stable context, patch only impacted ranges, and avoid rewriting untouched sections
+8. **Clarify Before Drift**: If product logic, acceptance criteria, or business intent remains ambiguous after repository and runtime evidence review, stop and ask instead of improvising
+9. **Completion Is Evidence-Based**: A skill should treat work as done only when the requested outcome, validation, and explicit runtime boundaries are all clear
+
+## Routing Authority and Overlap Resolution
+
+When multiple skills could plausibly apply, steer by decision ownership instead of by keywords alone:
+
+- Use **software-development-life-cycle** when the task is primarily about sequencing work, choosing architecture, or coordinating across layers.
+- Use **reviewer** when the task is primarily about production readiness, release risk, simplification, or gap-finding after implementation.
+- Use a domain specialist when the main risk lives inside that surface: web, mobile, backend, cloud/devops, QA, security, UI, UX, git, or memory.
+- If a task spans multiple domains, keep one skill as the manager and treat other specialists as bounded contributors through agents-as-tools, handoffs, or deterministic code orchestration as appropriate.
+- If the remaining uncertainty is about business intent rather than technical implementation, do not route deeper first; clarify with the user.
 
 ## Skill Hierarchy (Codex CLI)
 
@@ -61,6 +73,22 @@ Use this ladder before loading large amounts of context:
 4. **Full reads only for edit scope** — fully read the files that will actually be changed plus direct dependencies
 5. **Surgical patching** — update only the impacted ranges instead of rewriting whole files
 6. **Final re-read** — re-read the working brief and touched files before the final answer or validation step
+
+## OpenAI-Aligned Orchestration Defaults
+
+When skills delegate or compose work, follow these defaults:
+
+- **Agents as tools** when a manager should retain control of the turn, combine specialist outputs, or enforce shared guardrails and final formatting.
+- **Handoffs** when routing should transfer control so the selected specialist owns the rest of the turn directly.
+- **Code-orchestrated flow** for deterministic pipelines, strict sequencing, bounded retries, or parallel branches whose dependencies are already known.
+- **Hybrid patterns** are acceptable: a triage agent can hand off to a specialist, and that specialist can still call narrower agents as tools.
+
+## Context Sharing Defaults
+
+- **Keep local runtime state separate from model-visible context**. Application state, approvals, and dependencies are not automatically visible to the model.
+- **Share only the minimum necessary transcript** with delegated agents. Prefer concise handoff packets and filtered history over replaying the full conversation by default.
+- **Use structured handoff metadata only when needed**. Keep it small, explicit, and task-specific.
+- **Stick to one conversation continuation strategy per thread** unless there is a deliberate reconciliation plan.
 
 ## Final Output Memory Snapshot
 

@@ -359,11 +359,23 @@ Use multi-agent only when the work clearly benefits from bounded parallel discov
 - Independent comparison of conflict-resolution or history-rewrite options
 - Read-only evidence collection from multiple remotes, worktrees, or issue trackers
 
+OpenAI-aligned orchestration defaults:
+- Use **agents as tools** when one manager should keep control of the user-facing turn, combine specialist outputs, or enforce shared guardrails and final formatting.
+- Use **handoffs** when routing should transfer control so the selected specialist owns the rest of the turn directly.
+- Use **code-orchestrated sequencing** for deterministic repository audits, explicit retries, or bounded parallel branches whose dependencies are already known.
+- Hybrid patterns are acceptable when a triage agent hands off and the active specialist still calls narrower agents as tools.
+
+Context-sharing defaults:
+- Keep local runtime state and approvals separate from model-visible context unless they are intentionally exposed.
+- Prefer filtered history or concise handoff packets over replaying the full transcript by default.
+- Choose one conversation continuation strategy per thread unless there is an explicit reconciliation plan.
+- Preserve workflow names, trace metadata, and validation evidence for multi-agent Git investigations.
+
 Multi-agent discipline:
 - Launch only non-overlapping workstreams and keep one active writer unless the user explicitly requests concurrent mutation.
 - Wait on multiple agent IDs in one call instead of serial waits.
 - Avoid tight polling; while agents run, do non-overlapping work such as synthesizing findings, reading adjacent history, or preparing validation.
-- After integrating a finished agent's results, close that agent so it does not linger.
+- After integrating a finished agent's results, keep the agent available if that role is likely to receive follow-up in the current project; otherwise close it so it does not linger.
 - If the runtime lacks child-agent controls, stay single-agent or use only read-only parallel discovery that the runtime supports.
 
 Use single-agent for straightforward Git tasks or any task where a careful sequential audit is clearer.

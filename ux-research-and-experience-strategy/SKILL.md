@@ -40,6 +40,30 @@ Before proposing experience changes, build a concise experience brief:
 
 Use this brief to keep UX guidance concrete, measurable, and compatible with the real product context.
 
+## Experience Strategy Engine Defaults
+
+When a request is vague or the current flow feels weak, infer stronger UX strategy from the product context instead of offering generic advice:
+- classify the flow type first: acquisition landing page, onboarding, checkout, booking, dashboard task flow, settings, support, search, or expert workflow
+- identify the dominant UX risk: trust gap, comprehension gap, motivation drop, decision overload, recovery failure, slow navigation, or poor feedback
+- choose a matching experience posture: reassure, guide, accelerate, compare, confirm, or recover
+- define what the user must understand in the first screen, first action, and first error state
+- recommend a default journey shape with explicit friction removals, not just abstract heuristics
+- preserve established mental models when users already know the system, and spend redesign effort only where evidence shows confusion or drop-off
+- benchmark against 2-3 mature products or service experiences in the same category and explain which interaction patterns are worth emulating
+
+The result should feel like a deliberate product strategy, not a generic UX checklist.
+
+## Decision Architecture Defaults
+
+Make critical flows easier to understand and complete:
+- reduce choice overload by making one next step dominant and demoting secondary paths
+- group related decisions into chunks with clear headings, summaries, and progressive disclosure when needed
+- explain consequences before irreversible or high-trust actions such as payment, deletion, publish, or sharing
+- use defaults, recommendations, examples, and previews to reduce blank-page anxiety
+- show proof and reassurance near commitment moments: pricing, security, social proof, expected outcome, or support availability
+- if the user is comparing options, surface the decision criteria rather than forcing memory recall across screens
+- if the task spans multiple steps, preserve progress and show where the user is in the journey
+
 ## UX Output Contract
 
 When producing UX guidance, avoid vague recommendations and make the work implementation-ready:
@@ -287,6 +311,21 @@ Use these concrete checks before approving UX recommendations:
 - **Recovery paths are explicit**: error states should tell users what went wrong, what they can do next, and whether their prior action succeeded
 - **Loading, empty, success, and confirmation states reduce uncertainty** rather than just filling space
 - **Brownfield copy changes preserve familiar domain language** unless research shows that language itself causes confusion
+- **High-stakes flows earn reassurance**: security, privacy, billing, and destructive actions should answer the user's likely fear before they hesitate
+- **Momentum survives interruptions**: if a user is blocked by validation, auth, or connectivity, the product should help them resume without losing context
+- **Decision points show trade-offs**: pricing, plan choice, permissions, and setup options should clarify differences instead of hiding them behind vague labels
+- **The interface teaches just enough**: onboarding, first-run states, and advanced features should reveal complexity progressively rather than front-loading everything
+
+## Benchmarking for Familiarity and Conversion
+
+To improve UX quality beyond generic heuristics:
+- compare the target flow against 2-3 mature products users likely already understand
+- extract familiar interaction patterns, trust cues, and error-recovery models that reduce learning cost
+- preserve category conventions unless there is a clear product advantage in breaking them
+- distinguish between delightful novelty and harmful novelty; if a pattern makes the flow less predictable, justify it explicitly
+- tie every major recommendation to either user evidence, a benchmarked pattern, or a measurable business outcome
+- when you need fast examples of a UI pattern or flow, use curated inspiration sources such as Shoogle to inspect comparable surfaces, for example `https://shoogle.dev/` and focused searches like `https://shoogle.dev/search?q=chart`
+- treat Shoogle as a discovery aid for screenshots and familiar interaction ideas, then verify the recommendation against actual user goals, accessibility needs, and product constraints
 
 ## Accessibility & Inclusive Design
 
@@ -346,11 +385,23 @@ Use multi-agent only when the work clearly benefits from bounded parallel discov
 - Independent analysis of distinct user segments, journeys, or hypotheses
 - Read-only competitive or market evidence collection from multiple sources
 
+OpenAI-aligned orchestration defaults:
+- Use **agents as tools** when one manager should keep control of the user-facing turn, combine specialist outputs, or enforce shared guardrails and final formatting.
+- Use **handoffs** when routing should transfer control so the selected specialist owns the rest of the turn directly.
+- Use **code-orchestrated sequencing** for deterministic research pipelines, explicit retries, or bounded parallel branches whose dependencies are already known.
+- Hybrid patterns are acceptable when a triage agent hands off and the active specialist still calls narrower agents as tools.
+
+Context-sharing defaults:
+- Keep local runtime state and approvals separate from model-visible context unless they are intentionally exposed.
+- Prefer filtered history or concise handoff packets over replaying the full transcript by default.
+- Choose one conversation continuation strategy per thread unless there is an explicit reconciliation plan.
+- Preserve workflow names, trace metadata, and validation evidence for multi-agent UX investigations.
+
 Multi-agent discipline:
 - Launch only non-overlapping workstreams and keep one active writer unless the user explicitly requests concurrent mutation.
 - Wait on multiple agent IDs in one call instead of serial waits.
 - Avoid tight polling; while agents run, do non-overlapping work such as refining research questions, preparing a decision framework, or mapping outcome metrics.
-- After integrating a finished agent's results, close that agent so it does not linger.
+- After integrating a finished agent's results, keep the agent available if that role is likely to receive follow-up in the current project; otherwise close it so it does not linger.
 - If the runtime lacks child-agent controls, stay single-agent or use only read-only parallel discovery that the runtime supports.
 
 Use single-agent for straightforward UX tasks or whenever a sequential synthesis is more trustworthy than parallelization.

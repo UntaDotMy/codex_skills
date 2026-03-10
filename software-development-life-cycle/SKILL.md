@@ -343,6 +343,18 @@ Use multi-agent only when the work clearly benefits from bounded parallel discov
 - Independent verification of a risky design, migration, or rollout plan
 - Large codebase discovery where separate streams map contracts, implementations, and release gates
 
+OpenAI-aligned orchestration defaults:
+- Use **agents as tools** when one manager should keep control of the user-facing turn, combine specialist outputs, or enforce shared guardrails and formatting.
+- Use **handoffs** when routing should transfer control so the selected specialist owns the rest of the turn directly.
+- Use **code-orchestrated sequencing** for deterministic pipelines, explicit retries, or bounded parallel branches where dependencies are known ahead of time.
+- Hybrid patterns are allowed: a triage specialist can hand off, and the active specialist can still call narrower agents as tools for bounded subtasks.
+
+Context-sharing defaults:
+- Keep local runtime state, approvals, and dependencies separate from model-visible context unless they are intentionally exposed.
+- Prefer filtered history or concise handoff packets over replaying the full transcript by default.
+- Choose one conversation continuation strategy per thread unless you deliberately reconcile multiple state layers.
+- Preserve workflow names, trace metadata, and validation evidence when multi-agent work spans multiple runs.
+
 Multi-agent discipline:
 - Reuse an existing same-role sub-agent within the same project or workstream before spawning another one; prefer `send_input`, or `resume_agent` plus `send_input` if the agent was previously closed.
 - Keep at most one live sub-agent per role by default and one active writer unless the user explicitly requests concurrent mutation.

@@ -152,23 +152,36 @@ Use Codex CLI's multi-agent features when:
 - Need independent verification of complex decisions
 - Large codebase exploration benefits from parallel search
 
+OpenAI-aligned orchestration defaults:
+- Use **agents as tools** when one manager should keep control of the user-facing turn, combine specialist outputs, or enforce shared guardrails and final formatting.
+- Use **handoffs** when routing should transfer control so the selected specialist owns the rest of the turn directly.
+- Use **code-orchestrated sequencing** for deterministic review pipelines, explicit retries, or bounded parallel review lanes whose dependencies are already known.
+- Hybrid patterns are acceptable when a triage agent hands off and the active specialist still calls narrower agents as tools.
+
+Context-sharing defaults:
+- Keep local runtime state, approvals, and evidence stores separate from model-visible context unless they are intentionally exposed.
+- Prefer filtered history or concise handoff packets over replaying the full transcript by default.
+- Choose one conversation continuation strategy per thread unless there is an explicit reconciliation plan.
+- Preserve workflow names, trace metadata, and validation evidence for multi-agent reviews.
+
 Don't force multi-agent for simple tasks.
 
 ### Multi-Agent Execution Pattern (Completion-First)
 
 When multi-agent is used:
-1. Keep at most one live same-role review sub-agent by default for the same project or workstream, and check for that existing review agent before every `spawn_agent` call. Never spawn another same-role review agent if one already exists; always reuse it with `send_input`, or `resume_agent` then `send_input` if it was closed. Resume the closed same-role review agent before considering any new spawn.
-2. Spawn a new review sub-agent only when no same-role review agent exists and an independent task truly benefits from parallel work.
-3. Wait for sub-agents to complete before final synthesis and decision output.
-4. Prefer one `wait` call across all relevant agent IDs with a meaningful timeout instead of tight polling loops.
-5. Do non-overlapping work while agents run; only wait when the next step is truly blocked on their result.
-6. Avoid interrupting running sub-agents; do not use `send_input` with `interrupt=true` unless the user explicitly requests cancellation or redirection.
-7. Keep `fork_context=false` by default. Use `fork_context=true` only when the child truly needs the exact parent thread history; otherwise send a concise summary plus the specific files, decisions, or findings needed so startup tokens, latency, and cost stay bounded.
-8. If the active runtime does not expose child-agent controls, stay single-agent or use read-only parallel discovery only.
-9. If a spawned sub-agent is required for the review, do not finalize while it is still running. A sub-agent spawned to confirm, challenge, or independently verify the gap list is required by default until it reaches a terminal state, unless the user explicitly cancels or redirects the work.
-10. If `wait` times out, extend the timeout, continue other non-overlapping review work, and wait again unless the user explicitly cancels or redirects the task.
-11. Keep a same-role review agent alive while more review follow-up is likely in the current project; close it only when that review stream is truly done.
-12. Never close a required sub-agent while its status is still running or queued just because the main agent believes it is "no longer blocked" or already has enough local evidence.
+1. Keep at most one live same-role review sub-agent by default for the same project or workstream, and check for that existing review agent before every `spawn_agent` call. Never spawn another same-role review agent for that same workstream; always reuse it with `send_input`, or `resume_agent` then `send_input` if it was closed. Resume the closed same-role review agent before considering any new spawn.
+2. Spawn another `reviewer` sub-agent only when the user explicitly asks for multiple parallel reviewer passes, or when an independent review lane materially improves confidence and can be tracked as a distinct workstream.
+3. When multiple reviewer lanes are active, give each reviewer lane a distinct purpose or workstream label, wait for every required reviewer to complete, ensure the main agent must verify every reviewer output before acting, and send updated work back for another review pass when the implementation changes.
+4. Wait for sub-agents to complete before final synthesis and decision output.
+5. Prefer one `wait` call across all relevant agent IDs with a meaningful timeout instead of tight polling loops.
+6. Do non-overlapping work while agents run; only wait when the next step is truly blocked on their result.
+7. Avoid interrupting running sub-agents; do not use `send_input` with `interrupt=true` unless the user explicitly requests cancellation or redirection.
+8. Keep `fork_context=false` by default. Use `fork_context=true` only when the child truly needs the exact parent thread history; otherwise send a concise summary plus the specific files, decisions, or findings needed so startup tokens, latency, and cost stay bounded.
+9. If the active runtime does not expose child-agent controls, stay single-agent or use read-only parallel discovery only.
+10. If a spawned sub-agent is required for the review, do not finalize while it is still running. A sub-agent spawned to confirm, challenge, or independently verify the gap list is required by default until it reaches a terminal state, unless the user explicitly cancels or redirects the work.
+11. If `wait` times out, extend the timeout, continue other non-overlapping review work, and wait again unless the user explicitly cancels or redirects the task.
+12. Keep a same-role review agent alive while more review follow-up is likely in the current project; close it only when that review stream is truly done.
+13. Never close a required sub-agent while its status is still running or queued just because the main agent believes it is "no longer blocked" or already has enough local evidence.
 
 ## Real-World Review Scenarios
 

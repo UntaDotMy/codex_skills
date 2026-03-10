@@ -34,6 +34,11 @@
 - GitHub Primer: https://primer.style/
 - Shopify Polaris: https://shopify.dev/docs/apps/design-guidelines
 
+## Curated Inspiration and Pattern Discovery
+
+- Shoogle inspiration index: https://shoogle.dev/
+- Shoogle targeted pattern search example (`chart`): https://shoogle.dev/search?q=chart
+
 ## Skill Build Guidance
 
 - OpenAI Codex Skills docs: https://developers.openai.com/codex/skills#create-a-skill

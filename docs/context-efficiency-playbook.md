@@ -44,6 +44,37 @@ Use the cheapest useful retrieval layer first:
 
 Keep stable instructions and reusable setup text at the front of prompts, and append volatile evidence later. This improves cache reuse and reduces repeated billed input on compatible models.
 
+### Research Cache Design
+
+Persist reusable research findings when they answer a non-trivial question correctly enough to change future work.
+
+Cache these items:
+
+- resolved API usage patterns and correct command sequences
+- version-specific caveats and migration notes with freshness dates
+- known library bugs or workaround patterns with source links
+- external benchmark findings that are likely to be reused
+- search terms or source combinations that consistently produced the right answer
+
+Do not cache these items durably:
+
+- raw transcripts or full tool logs
+- large copied documentation blocks
+- stale vendor pricing, model behavior, or release claims without freshness markers
+- one-off local environment noise that is not reusable outside the current task
+
+Freshness rules:
+
+- official docs and standards can live longer, but refresh when version-sensitive
+- community workarounds should carry a shorter freshness horizon and lower default confidence
+- durable architecture principles can stay longer when they are not tied to a fast-moving version
+- if a cached finding is disproven, convert it into a penalty pattern and mark it stale instead of silently reusing it
+
+Reward and penalty loop:
+
+- validated cache hits become rewarded patterns that future agents should prefer first
+- repeated mistakes, stale assumptions, and disproven cache entries become penalty patterns that future agents should avoid or refresh
+
 ### Surgical Patching
 
 Prefer:

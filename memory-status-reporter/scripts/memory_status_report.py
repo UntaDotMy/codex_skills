@@ -16,6 +16,9 @@ class RolloutSummary:
     updated_at: datetime
     task_outcomes: list[str]
     reusable_knowledge: list[str]
+    rewarded_patterns: list[str]
+    research_cache_updates: list[str]
+    stale_findings: list[str]
     issues: list[str]
 
 
@@ -228,6 +231,9 @@ def parse_rollout_summary(file_path: Path, timezone_value: ZoneInfo) -> RolloutS
         for match in re.finditer(r"^Outcome:\s*(.+)$", text, flags=re.MULTILINE)
     ]
     reusable_knowledge = extract_bullets_after_label(lines, "Reusable knowledge:")
+    rewarded_patterns = extract_bullets_after_label(lines, "Rewarded patterns:")
+    research_cache_updates = extract_bullets_after_label(lines, "Research cache updates:")
+    stale_findings = extract_bullets_after_label(lines, "Stale findings:")
     issues = extract_bullets_after_label(lines, "Things that did not work / can be improved:")
 
     return RolloutSummary(
@@ -236,6 +242,9 @@ def parse_rollout_summary(file_path: Path, timezone_value: ZoneInfo) -> RolloutS
         updated_at=parsed_updated_at.astimezone(timezone_value),
         task_outcomes=task_outcomes,
         reusable_knowledge=reusable_knowledge,
+        rewarded_patterns=rewarded_patterns,
+        research_cache_updates=research_cache_updates,
+        stale_findings=stale_findings,
         issues=issues,
     )
 
@@ -332,6 +341,47 @@ def build_recent_context(
     return context_lines
 
 
+def normalize_pattern_key(raw_text: str) -> str:
+    normalized_text = raw_text.lower().strip()
+    normalized_text = re.sub(r"\s+", " ", normalized_text)
+    normalized_text = re.sub(r"[^a-z0-9 ]", "", normalized_text)
+    return normalized_text
+
+
+def classify_research_cache_update(update_text: str) -> str:
+    normalized_update = update_text.lower()
+    if any(marker in normalized_update for marker in ("stale", "refresh", "refreshed", "expired", "version-sensitive", "date-sensitive")):
+        return "refresh"
+    if any(marker in normalized_update for marker in ("reused", "cache hit", "reused result", "reapplied", "reused finding")):
+        return "reused"
+    return "new"
+
+
+def collect_repeated_penalty_patterns(window_summaries: list[RolloutSummary]) -> list[str]:
+    repeated_pattern_counts: dict[str, int] = {}
+    repeated_pattern_examples: dict[str, str] = {}
+
+    for summary in window_summaries:
+        all_tasks_succeeded = bool(summary.task_outcomes) and all(
+            task_outcome == "success" for task_outcome in summary.task_outcomes
+        )
+        for issue in summary.issues:
+            issue_status = classify_issue(issue, all_tasks_succeeded)
+            if issue_status == "resolved":
+                continue
+            normalized_issue = normalize_pattern_key(issue)
+            if not normalized_issue:
+                continue
+            repeated_pattern_counts[normalized_issue] = repeated_pattern_counts.get(normalized_issue, 0) + 1
+            repeated_pattern_examples.setdefault(normalized_issue, issue)
+
+    return [
+        f"{repeated_pattern_examples[normalized_issue]} (repeated {repeat_count} times)"
+        for normalized_issue, repeat_count in repeated_pattern_counts.items()
+        if repeat_count > 1
+    ]
+
+
 def compute_daily_growth_units(
     summaries: list[RolloutSummary],
 ) -> dict[date, int]:
@@ -407,6 +457,22 @@ def build_report_payload(
         for summary in window_summaries
         for knowledge_item in summary.reusable_knowledge
     ]
+    rewarded_patterns = [
+        rewarded_pattern
+        for summary in window_summaries
+        for rewarded_pattern in summary.rewarded_patterns
+    ]
+    research_cache_updates = [
+        cache_update
+        for summary in window_summaries
+        for cache_update in summary.research_cache_updates
+    ]
+    stale_findings = [
+        stale_finding
+        for summary in window_summaries
+        for stale_finding in summary.stale_findings
+    ]
+    repeated_penalty_patterns = collect_repeated_penalty_patterns(window_summaries)
 
     classified_issues = []
     for summary in window_summaries:
@@ -429,6 +495,17 @@ def build_report_payload(
     resolved_tool_issues = [issue for issue in resolved_issues if is_tool_issue(issue["text"])]
     open_tool_issues = [issue for issue in open_issues if is_tool_issue(issue["text"])]
     unclear_tool_issues = [issue for issue in unclear_issues if is_tool_issue(issue["text"])]
+    penalty_patterns = stale_findings + repeated_penalty_patterns
+    reused_cache_updates = [
+        cache_update
+        for cache_update in research_cache_updates
+        if classify_research_cache_update(cache_update) == "reused"
+    ]
+    refreshed_cache_updates = [
+        cache_update
+        for cache_update in research_cache_updates
+        if classify_research_cache_update(cache_update) == "refresh"
+    ]
 
     memory_text = (memory_base / "MEMORY.md").read_text(encoding="utf-8") if (memory_base / "MEMORY.md").exists() else ""
     memory_summary_text = (memory_base / "memory_summary.md").read_text(encoding="utf-8") if (memory_base / "memory_summary.md").exists() else ""
@@ -470,6 +547,14 @@ def build_report_payload(
             "failed": failed_tasks,
         },
         "learning_items": reusable_knowledge,
+        "rewarded_patterns": rewarded_patterns,
+        "penalty_patterns": penalty_patterns,
+        "research_cache": {
+            "updates": research_cache_updates,
+            "reused": reused_cache_updates,
+            "refreshed": refreshed_cache_updates,
+            "stale": stale_findings,
+        },
         "mistakes": {
             "resolved": resolved_issues,
             "open": open_issues,
@@ -496,6 +581,10 @@ def build_report_payload(
             len(resolved_tool_issues),
             len(resolved_tool_issues) + len(open_tool_issues) + len(unclear_tool_issues),
         ),
+        "reward_strength": len(rewarded_patterns) + len(reusable_knowledge),
+        "penalty_pressure": len(penalty_patterns) + len(open_issues) + len(unclear_issues),
+        "cache_reuse_rate": format_percentage(len(reused_cache_updates), len(research_cache_updates)),
+        "cache_freshness_risk": len(stale_findings),
         "brain_growth_rate": format_percentage(growth_units, durable_bank_size),
         "learning_momentum": None if momentum_value is None else f"{momentum_value:.1f}%",
         "recent_context": build_recent_context(all_summaries, window_start),
@@ -523,6 +612,26 @@ def render_markdown(report_payload: dict) -> str:
     needs_lines = report_payload["user_needs"][:6]
     if not needs_lines:
         needs_lines = ["No recurring user-needs summary is available yet in memory_summary.md."]
+
+    rewarded_pattern_lines = report_payload["rewarded_patterns"][:8]
+    if not rewarded_pattern_lines:
+        rewarded_pattern_lines = ["No rewarded patterns were captured in the requested window."]
+
+    research_cache_lines: list[str] = []
+    if report_payload["research_cache"]["reused"]:
+        research_cache_lines.extend(
+            f"Reused: {cache_update}" for cache_update in report_payload["research_cache"]["reused"][:6]
+        )
+    if report_payload["research_cache"]["refreshed"]:
+        research_cache_lines.extend(
+            f"Refreshed: {cache_update}" for cache_update in report_payload["research_cache"]["refreshed"][:6]
+        )
+    if report_payload["research_cache"]["stale"]:
+        research_cache_lines.extend(
+            f"Stale: {cache_update}" for cache_update in report_payload["research_cache"]["stale"][:6]
+        )
+    if not research_cache_lines:
+        research_cache_lines = ["No research-cache updates were captured in the requested window."]
 
     mistake_lines: list[str] = []
     for status_name in ("resolved", "open", "unclear"):
@@ -565,6 +674,13 @@ def render_markdown(report_payload: dict) -> str:
     lines.extend(
         [
             "",
+            "## Rewarded Patterns",
+        ]
+    )
+    lines.extend(f"- {line}" for line in rewarded_pattern_lines)
+    lines.extend(
+        [
+            "",
             "## Mistakes Encountered",
         ]
     )
@@ -576,6 +692,13 @@ def render_markdown(report_payload: dict) -> str:
         ]
     )
     lines.extend(f"- {line}" for line in tool_mistake_lines)
+    lines.extend(
+        [
+            "",
+            "## Research Cache Health",
+        ]
+    )
+    lines.extend(f"- {line}" for line in research_cache_lines)
     lines.extend(
         [
             "",
@@ -608,6 +731,10 @@ def render_markdown(report_payload: dict) -> str:
                 f"({len(report_payload['tool_mistakes']['resolved'])} resolved of "
                 f"{len(report_payload['tool_mistakes']['resolved']) + len(report_payload['tool_mistakes']['open']) + len(report_payload['tool_mistakes']['unclear'])} captured tool mistake(s))"
             ),
+            f"- Reward strength: {report_payload['reward_strength']} rewarded unit(s)",
+            f"- Penalty pressure: {report_payload['penalty_pressure']} penalty unit(s)",
+            f"- Cache reuse: {report_payload['cache_reuse_rate']} ({len(report_payload['research_cache']['reused'])} reused of {len(report_payload['research_cache']['updates'])} cache update(s))",
+            f"- Cache freshness risk: {report_payload['cache_freshness_risk']} stale finding(s)",
             f"- Brain size now: {report_payload['durable_bank_size']} durable memory unit(s)",
             (
                 "- Brain growth in window: "
@@ -635,6 +762,8 @@ def render_compact_markdown(report_payload: dict) -> str:
     tool_mistake_count = sum(
         len(report_payload["tool_mistakes"][status_name]) for status_name in ("resolved", "open", "unclear")
     )
+    rewarded_pattern_count = len(report_payload["rewarded_patterns"])
+    stale_cache_count = len(report_payload["research_cache"]["stale"])
     open_mistake_count = len(report_payload["mistakes"]["open"]) + len(report_payload["tool_mistakes"]["open"])
     momentum_value = report_payload["learning_momentum"] or "n/a"
 
@@ -656,6 +785,11 @@ def render_compact_markdown(report_payload: dict) -> str:
                 "- Tool-use mistakes: "
                 f"{tool_mistake_count} captured, {len(report_payload['tool_mistakes']['resolved'])} resolved, "
                 f"{len(report_payload['tool_mistakes']['open'])} open, {len(report_payload['tool_mistakes']['unclear'])} unclear"
+            ),
+            (
+                "- Reinforcement: "
+                f"reward strength {report_payload['reward_strength']} with {rewarded_pattern_count} rewarded pattern(s), "
+                f"penalty pressure {report_payload['penalty_pressure']}, cache freshness risk {stale_cache_count}"
             ),
             (
                 "- Memory health (heuristic): "

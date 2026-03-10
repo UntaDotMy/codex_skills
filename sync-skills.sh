@@ -6,11 +6,16 @@
 
 set -e  # Exit on error
 
+# Silence deprecated environment noise inherited from some shells.
+unset GREP_OPTIONS
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Directories
@@ -89,6 +94,7 @@ MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- Prefer modular structure: keep entrypoints thin, move named logic into focused files, and separate backend, API, frontend, workers, and tests when the project spans those concerns."
     "- Before finalizing non-trivial work, re-read the working brief, acceptance criteria, and touched files, then append a compact Learning Snapshot grounded in memory artifacts when available."
     "- If a tool call fails or is misused and the fix teaches a reusable lesson, record it as a mistake with tool name, symptom, cause, fix, and prevention note in rollout summaries and durable memory."
+    "- Promote validated wins into rewarded patterns, repeated mistakes into penalty patterns, and reusable research into a freshness-aware cache so future tasks research only what is new."
 )
 
 config_has_required_memory_status_lines() {
@@ -121,6 +127,350 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_section() {
+    local title=$1
+    printf '\n%s%s%s\n' "$BOLD$CYAN" "$title" "$NC"
+}
+
+print_menu_option() {
+    local option_key=$1
+    local option_label=$2
+    printf '  %b[%s]%b %s\n' "$BOLD$CYAN" "$option_key" "$NC" "$option_label"
+}
+
+supports_interactive_output() {
+    [[ -n "${TERM:-}" ]] && [[ "${TERM:-}" != "dumb" ]] && [[ -t 1 ]]
+}
+
+print_header() {
+    local title=$1
+    printf '\n%s%s%s\n' "$BOLD$CYAN" "$title" "$NC"
+}
+
+print_key_value() {
+    local label=$1
+    local value=$2
+    printf '  %-28s %s\n' "$label" "$value"
+}
+
+print_status_line() {
+    local status_label=$1
+    local detail=$2
+    printf '\r\033[2K%b[%s]%b %s' "$BOLD$CYAN" "$status_label" "$NC" "$detail"
+}
+
+finish_status_line() {
+    local status_label=$1
+    local detail=$2
+    print_status_line "$status_label" "$detail"
+    printf '\n'
+}
+
+print_inline_step() {
+    local message=$1
+    print_status_line "run" "$message"
+}
+
+print_inline_result() {
+    local status=$1
+    local detail=$2
+    case "$status" in
+        ok)
+            finish_status_line "OK" "$detail"
+            ;;
+        warn)
+            finish_status_line "WARN" "$detail"
+            ;;
+        error)
+            finish_status_line "FAIL" "$detail"
+            ;;
+        *)
+            finish_status_line "INFO" "$detail"
+            ;;
+    esac
+}
+
+run_task_line() {
+    local task_label=$1
+    shift
+    run_quiet_with_spinner "$task_label" "$@"
+}
+
+run_with_spinner() {
+    local loading_message=$1
+    shift
+    local spinner_pid
+    local command_exit_code
+    local spinner_delay=0.1
+
+    if ! supports_interactive_output; then
+        print_inline_step "$loading_message"
+        set +e
+        "$@"
+        command_exit_code=$?
+        set -e
+        if [[ $command_exit_code -eq 0 ]]; then
+            print_inline_result ok "$loading_message"
+        else
+            print_inline_result error "$loading_message"
+        fi
+        return $command_exit_code
+    fi
+
+    (
+        local spinner_index=0
+        while true; do
+            spinner_index=$(((spinner_index + 1) % 4))
+            case "$spinner_index" in
+                0) print_status_line "run" "$loading_message |" ;;
+                1) print_status_line "run" "$loading_message /" ;;
+                2) print_status_line "run" "$loading_message -" ;;
+                *) print_status_line "run" "$loading_message \\" ;;
+            esac
+            sleep "$spinner_delay"
+        done
+    ) &
+    spinner_pid=$!
+
+    set +e
+    "$@"
+    command_exit_code=$?
+    set -e
+
+    kill "$spinner_pid" >/dev/null 2>&1 || true
+    wait "$spinner_pid" 2>/dev/null || true
+
+    if [[ $command_exit_code -eq 0 ]]; then
+        finish_status_line "OK" "$loading_message"
+    else
+        finish_status_line "FAIL" "$loading_message"
+    fi
+
+    return $command_exit_code
+}
+
+run_quiet_with_spinner() {
+    local loading_message=$1
+    shift
+    local spinner_pid
+    local command_exit_code
+    local spinner_delay=0.1
+    local temporary_output_file
+    temporary_output_file="$(mktemp)"
+
+    if ! supports_interactive_output; then
+        print_inline_step "$loading_message"
+        set +e
+        "$@" >"$temporary_output_file" 2>&1
+        command_exit_code=$?
+        set -e
+        if [[ $command_exit_code -eq 0 ]]; then
+            print_inline_result ok "$loading_message"
+            rm -f "$temporary_output_file"
+            return 0
+        fi
+
+        print_inline_result error "$loading_message"
+        cat "$temporary_output_file" >&2
+        rm -f "$temporary_output_file"
+        return $command_exit_code
+    fi
+
+    (
+        local spinner_index=0
+        while true; do
+            spinner_index=$(((spinner_index + 1) % 4))
+            case "$spinner_index" in
+                0) print_status_line "run" "$loading_message |" ;;
+                1) print_status_line "run" "$loading_message /" ;;
+                2) print_status_line "run" "$loading_message -" ;;
+                *) print_status_line "run" "$loading_message \\" ;;
+            esac
+            sleep "$spinner_delay"
+        done
+    ) &
+    spinner_pid=$!
+
+    set +e
+    "$@" >"$temporary_output_file" 2>&1
+    command_exit_code=$?
+    set -e
+
+    kill "$spinner_pid" >/dev/null 2>&1 || true
+    wait "$spinner_pid" 2>/dev/null || true
+
+    if [[ $command_exit_code -eq 0 ]]; then
+        finish_status_line "OK" "$loading_message"
+        rm -f "$temporary_output_file"
+        return 0
+    fi
+
+    finish_status_line "FAIL" "$loading_message"
+    cat "$temporary_output_file" >&2
+    rm -f "$temporary_output_file"
+    return $command_exit_code
+}
+
+parallel_worker_limit() {
+    local detected_cpu_count
+
+    if command -v nproc >/dev/null 2>&1; then
+        detected_cpu_count="$(nproc)"
+    elif command -v getconf >/dev/null 2>&1; then
+        detected_cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+    elif [[ -n "${NUMBER_OF_PROCESSORS:-}" ]]; then
+        detected_cpu_count="$NUMBER_OF_PROCESSORS"
+    else
+        detected_cpu_count=4
+    fi
+
+    if [[ -z "$detected_cpu_count" ]] || ! [[ "$detected_cpu_count" =~ ^[0-9]+$ ]] || [[ "$detected_cpu_count" -lt 1 ]]; then
+        detected_cpu_count=4
+    fi
+
+    if [[ "$detected_cpu_count" -gt 8 ]]; then
+        detected_cpu_count=8
+    fi
+
+    printf '%s\n' "$detected_cpu_count"
+}
+
+run_items_in_parallel() {
+    local worker_function_name=$1
+    shift
+    local worker_limit=$1
+    shift
+    local worker_items=("$@")
+    local active_job_count=0
+    local overall_result=0
+    local worker_item
+
+    if [[ ${#worker_items[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    for worker_item in "${worker_items[@]}"; do
+        "$worker_function_name" "$worker_item" &
+        ((active_job_count+=1))
+        if [[ $active_job_count -ge $worker_limit ]]; then
+            if ! wait -n; then
+                overall_result=1
+            fi
+            ((active_job_count-=1))
+        fi
+    done
+
+    while [[ $active_job_count -gt 0 ]]; do
+        if ! wait -n; then
+            overall_result=1
+        fi
+        ((active_job_count-=1))
+    done
+
+    return $overall_result
+}
+
+list_repo_skill_directories() {
+    local skill_directory
+
+    for skill_directory in "$CODEX_SOURCE"/*/; do
+        if [[ -f "$skill_directory/SKILL.md" ]]; then
+            printf '%s\n' "$skill_directory"
+        fi
+    done | LC_ALL=C sort
+}
+
+repo_skill_directories_array() {
+    mapfile -t REPO_SKILL_DIRECTORIES < <(list_repo_skill_directories)
+}
+
+PARALLEL_VALIDATION_STATUS_DIRECTORY=""
+
+validate_skill_directory_worker() {
+    local skill_directory=$1
+    local skill_name
+    local skill_log_file
+    skill_name="$(basename "$skill_directory")"
+    skill_log_file="$PARALLEL_VALIDATION_STATUS_DIRECTORY/$skill_name.log"
+
+    if validate_codex_skill_dir "$skill_directory" >"$skill_log_file" 2>&1; then
+        : > "$PARALLEL_VALIDATION_STATUS_DIRECTORY/$skill_name.ok"
+    else
+        : > "$PARALLEL_VALIDATION_STATUS_DIRECTORY/$skill_name.failed"
+    fi
+}
+
+collect_failed_skill_names_parallel() {
+    local status_directory
+    local worker_limit
+    local skill_directory
+
+    status_directory="$(mktemp -d)"
+    PARALLEL_VALIDATION_STATUS_DIRECTORY="$status_directory"
+    repo_skill_directories_array
+    worker_limit="$(parallel_worker_limit)"
+
+    if [[ ${#REPO_SKILL_DIRECTORIES[@]} -eq 0 ]]; then
+        rm -rf "$status_directory"
+        PARALLEL_VALIDATION_STATUS_DIRECTORY=""
+        return 0
+    fi
+
+    run_items_in_parallel validate_skill_directory_worker "$worker_limit" "${REPO_SKILL_DIRECTORIES[@]}"
+
+    for skill_directory in "${REPO_SKILL_DIRECTORIES[@]}"; do
+        local skill_name
+        skill_name="$(basename "$skill_directory")"
+        if [[ -f "$status_directory/$skill_name.failed" ]]; then
+            printf '%s\n' "$skill_name"
+        fi
+    done
+
+    rm -rf "$status_directory"
+    PARALLEL_VALIDATION_STATUS_DIRECTORY=""
+}
+
+PARALLEL_CHECKSUM_STATUS_DIRECTORY=""
+
+verify_skill_checksum_worker() {
+    local skill_name=$1
+    local checksum_log_file="$PARALLEL_CHECKSUM_STATUS_DIRECTORY/$skill_name.log"
+
+    if verify_skill_checksum "$skill_name" >"$checksum_log_file" 2>&1; then
+        : > "$PARALLEL_CHECKSUM_STATUS_DIRECTORY/$skill_name.ok"
+    else
+        : > "$PARALLEL_CHECKSUM_STATUS_DIRECTORY/$skill_name.failed"
+    fi
+}
+
+collect_failed_checksum_skill_names_parallel() {
+    local status_directory
+    local worker_limit
+    local skill_name
+
+    status_directory="$(mktemp -d)"
+    PARALLEL_CHECKSUM_STATUS_DIRECTORY="$status_directory"
+    repo_skill_names_array
+    worker_limit="$(parallel_worker_limit)"
+
+    if [[ ${#REPO_SKILL_NAMES[@]} -eq 0 ]]; then
+        rm -rf "$status_directory"
+        PARALLEL_CHECKSUM_STATUS_DIRECTORY=""
+        return 0
+    fi
+
+    run_items_in_parallel verify_skill_checksum_worker "$worker_limit" "${REPO_SKILL_NAMES[@]}"
+
+    for skill_name in "${REPO_SKILL_NAMES[@]}"; do
+        if [[ -f "$status_directory/$skill_name.failed" ]]; then
+            printf '%s\n' "$skill_name"
+        fi
+    done
+
+    rm -rf "$status_directory"
+    PARALLEL_CHECKSUM_STATUS_DIRECTORY=""
 }
 
 skill_manager_state_directory() {
@@ -167,6 +517,204 @@ updated_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 platform=$PLATFORM_NAME
 target=$CODEX_TARGET
 EOF
+}
+
+managed_skill_inventory_file() {
+    printf '%s/managed-skills.txt\n' "$(skill_manager_state_directory)"
+}
+
+managed_home_agent_inventory_file() {
+    printf '%s/managed-home-agents.txt\n' "$(skill_manager_state_directory)"
+}
+
+list_skill_agent_config_files() {
+    local skill_name=$1
+    local agents_directory="$CODEX_SOURCE/$skill_name/agents"
+
+    [[ -d "$agents_directory" ]] || return 0
+
+    find "$agents_directory" -maxdepth 1 -type f -name '*.yaml' | LC_ALL=C sort
+}
+
+home_agent_name_from_agent_config() {
+    local skill_name=$1
+    local agent_config_path=$2
+    local agent_config_basename
+    agent_config_basename="$(basename "$agent_config_path" .yaml)"
+
+    if [[ "$agent_config_basename" == "openai" ]]; then
+        printf '%s\n' "$skill_name"
+        return 0
+    fi
+
+    printf '%s\n' "$agent_config_basename"
+}
+
+write_managed_skill_inventory_from_repo() {
+    local inventory_file
+    inventory_file="$(managed_skill_inventory_file)"
+
+    ensure_skill_manager_state_directories
+    list_repo_skill_names > "$inventory_file"
+}
+
+write_managed_home_agent_inventory_from_repo() {
+    local inventory_file
+    local skill_name
+    local agent_config_path
+    local home_agent_name
+
+    inventory_file="$(managed_home_agent_inventory_file)"
+    ensure_skill_manager_state_directories
+
+    : > "$inventory_file"
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        while IFS= read -r agent_config_path; do
+            [[ -n "$agent_config_path" ]] || continue
+            home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+            printf '%s|%s\n' "$skill_name" "$home_agent_name" >> "$inventory_file"
+        done < <(list_skill_agent_config_files "$skill_name")
+    done < <(list_repo_skill_names)
+
+    sort -u -o "$inventory_file" "$inventory_file"
+}
+
+remove_skill_from_managed_inventory() {
+    local skill_name=$1
+    local inventory_file
+    local temporary_inventory_file
+    inventory_file="$(managed_skill_inventory_file)"
+
+    [[ -f "$inventory_file" ]] || return 0
+
+    temporary_inventory_file="$(mktemp)"
+    grep -vxF -- "$skill_name" "$inventory_file" > "$temporary_inventory_file" || true
+    mv "$temporary_inventory_file" "$inventory_file"
+}
+
+remove_home_agent_from_managed_inventory() {
+    local skill_name=$1
+    local home_agent_name=$2
+    local inventory_file
+    local temporary_inventory_file
+
+    inventory_file="$(managed_home_agent_inventory_file)"
+    [[ -f "$inventory_file" ]] || return 0
+
+    temporary_inventory_file="$(mktemp)"
+    grep -vxF -- "$skill_name|$home_agent_name" "$inventory_file" > "$temporary_inventory_file" || true
+    mv "$temporary_inventory_file" "$inventory_file"
+}
+
+list_tracked_managed_skill_names() {
+    local inventory_file
+    local skill_name
+    inventory_file="$(managed_skill_inventory_file)"
+
+    if [[ -f "$inventory_file" ]]; then
+        awk 'NF {print $0}' "$inventory_file" | LC_ALL=C sort -u
+        return 0
+    fi
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        if [[ -d "$CODEX_TARGET/skills/$skill_name" ]]; then
+            printf '%s\n' "$skill_name"
+        fi
+    done < <(list_repo_skill_names) | LC_ALL=C sort
+}
+
+list_removed_repo_managed_skill_names() {
+    local skill_name
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        if [[ ! -d "$CODEX_SOURCE/$skill_name" ]] || [[ ! -f "$CODEX_SOURCE/$skill_name/SKILL.md" ]]; then
+            printf '%s\n' "$skill_name"
+        fi
+    done < <(list_tracked_managed_skill_names) | LC_ALL=C sort
+}
+
+list_tracked_home_agent_names_for_skill() {
+    local skill_name=$1
+    local inventory_file
+
+    inventory_file="$(managed_home_agent_inventory_file)"
+    if [[ -f "$inventory_file" ]]; then
+        awk -F'|' -v selected_skill="$skill_name" '$1 == selected_skill && NF >= 2 {print $2}' "$inventory_file" | LC_ALL=C sort -u
+        return 0
+    fi
+
+    printf '%s\n' "$skill_name"
+}
+
+spark_override_model_for_home_agent() {
+    return 1
+}
+
+expected_reasoning_for_home_agent() {
+    local home_agent_name=$1
+    local fallback_reasoning=$2
+
+    printf '%s\n' "$fallback_reasoning"
+}
+
+PYTHON_LAUNCHER=""
+
+detect_python_launcher() {
+    if command -v python3 >/dev/null 2>&1 && python3 -c "import sys" >/dev/null 2>&1; then
+        echo "python3"
+        return 0
+    fi
+
+    if command -v python >/dev/null 2>&1 && python -c "import sys" >/dev/null 2>&1; then
+        echo "python"
+        return 0
+    fi
+
+    if command -v py >/dev/null 2>&1 && py -3 -c "import sys" >/dev/null 2>&1; then
+        echo "py -3"
+        return 0
+    fi
+
+    return 1
+}
+
+ensure_python_launcher() {
+    if [[ -n "${PYTHON_LAUNCHER:-}" ]]; then
+        return 0
+    fi
+
+    PYTHON_LAUNCHER="$(detect_python_launcher)" || {
+        print_error "Python 3 is required for install, update, and config wiring. Install Python 3 or ensure python, python3, or py -3 is available."
+        return 1
+    }
+
+    return 0
+}
+
+run_python() {
+    ensure_python_launcher || return 1
+
+    case "$PYTHON_LAUNCHER" in
+        "py -3")
+            py -3 "$@"
+            ;;
+        *)
+            "$PYTHON_LAUNCHER" "$@"
+            ;;
+    esac
+}
+
+ensure_sync_runtime_prerequisites() {
+    ensure_python_launcher || return 1
+
+    if ! md5_for_file "$CODEX_SOURCE/AGENTS.md" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    return 0
 }
 
 SKILL_SYNC_DIRECTORIES=(
@@ -270,6 +818,14 @@ list_repo_skill_names() {
             basename "$skill_dir"
         fi
     done | LC_ALL=C sort
+}
+
+repo_skill_names_array() {
+    mapfile -t REPO_SKILL_NAMES < <(list_repo_skill_names)
+}
+
+installed_skill_names_array() {
+    mapfile -t INSTALLED_SKILL_NAMES < <(list_installed_skill_names)
 }
 
 list_installed_skill_names() {
@@ -376,21 +932,28 @@ verify_skill_checksum() {
 verify_pack_checksums() {
     local failed=0
     local skill_name
+    local failed_checksum_skill_name
 
-    verify_root_file_checksum "AGENTS.md" || failed=1
-    verify_root_file_checksum "00-skill-routing-and-escalation.md" || failed=1
+    run_task_line "verify root files" verify_root_file_checksum "AGENTS.md" || failed=1
+    run_task_line "verify root routing" verify_root_file_checksum "00-skill-routing-and-escalation.md" || failed=1
+
+    while IFS= read -r failed_checksum_skill_name; do
+        [[ -n "$failed_checksum_skill_name" ]] || continue
+        failed=1
+    done < <(collect_failed_checksum_skill_names_parallel)
 
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
-        verify_skill_checksum "$skill_name" || failed=1
-    done < <(list_repo_skill_names)
+        print_error "Managed installed skill no longer exists in the repo: $skill_name"
+        failed=1
+    done < <(list_removed_repo_managed_skill_names)
 
     if [[ $failed -eq 0 ]]; then
-        print_success "All MD5 verification checks passed."
+        print_success "All MD5 verification checks passed"
         return 0
     fi
 
-    print_error "One or more MD5 verification checks failed."
+    print_error "One or more MD5 verification checks failed"
     return 1
 }
 
@@ -439,10 +1002,125 @@ validate_skill() {
     return 0
 }
 
+file_contains_all_patterns() {
+    local file_path=$1
+    shift
+    local required_pattern
+
+    for required_pattern in "$@"; do
+        if ! grep -Eqi -- "$required_pattern" "$file_path"; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+markdown_section_content() {
+    local file_path=$1
+    local section_heading=$2
+
+    awk -v heading="$section_heading" '
+        function heading_level(line,    level_value) {
+            match(line, /^#+/)
+            level_value = RLENGTH
+            return level_value
+        }
+
+        /^#+ / {
+            current_heading_title = $0
+            sub(/^#+ /, "", current_heading_title)
+
+            if (!in_section && current_heading_title == heading) {
+                in_section = 1
+                target_level = heading_level($0)
+                next
+            }
+
+            if (in_section && heading_level($0) <= target_level) {
+                exit
+            }
+        }
+
+        in_section { print }
+    ' "$file_path"
+}
+
+markdown_section_has_minimum_bullets() {
+    local file_path=$1
+    local section_heading=$2
+    local minimum_bullet_count=$3
+    local actual_bullet_count
+
+    actual_bullet_count=$(markdown_section_content "$file_path" "$section_heading" | grep -Ec '^[[:space:]]*[-*][[:space:]]' || true)
+    [[ "$actual_bullet_count" -ge "$minimum_bullet_count" ]]
+}
+
+markdown_section_contains_all_patterns() {
+    local file_path=$1
+    local section_heading=$2
+    shift 2
+    local required_pattern
+    local section_content
+
+    section_content="$(markdown_section_content "$file_path" "$section_heading")"
+    [[ -n "$section_content" ]] || return 1
+
+    for required_pattern in "$@"; do
+        if ! printf '%s\n' "$section_content" | grep -Eqi -- "$required_pattern"; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+skill_has_required_runtime_guidance() {
+    local file_path=$1
+
+    file_contains_all_patterns "$file_path" \
+        'js_repl' \
+        'codex\.tool' \
+        'terminal state before finalizing|wait[^\n]*required sub-agent' \
+        'Do not close a required running sub-agent|forbid closing a running required sub-agent early' \
+        'keep at most one live same-role agent' \
+        'never spawn a second same-role sub-agent if one already exists' \
+        'always reuse it with .*send_input.*resume_agent|always reuse it with `send_input` or `resume_agent`' \
+        'resume a closed same-role agent before considering any new spawn' \
+        'fork_context' \
+        'maintain a lightweight spawned-agent list' \
+        'send a robust handoff covering the exact objective'
+}
+
+agent_config_has_required_runtime_guidance() {
+    local file_path=$1
+
+    file_contains_all_patterns "$file_path" \
+        'js_repl' \
+        'codex\.tool' \
+        'Always research current external information before trusting internal knowledge' \
+        'terminal state before finalizing|wait[^\n]*required sub-agent' \
+        'Do not close a required running sub-agent|forbid closing a running required sub-agent early' \
+        'keep at most one live same-role agent' \
+        'never spawn a second same-role sub-agent if one already exists' \
+        'always reuse it with send_input or resume_agent|always reuse it with .*send_input.*resume_agent' \
+        'resume a closed same-role agent before considering any new spawn' \
+        'fork_context off unless the exact parent thread history is required|fork_context[^\n]*exact parent thread history' \
+        'maintain a lightweight spawned-agent list' \
+        'send a robust handoff covering the exact objective' \
+        'working brief' \
+        'test-first when practical'
+}
+
 # Validate a Codex skill directory for Codex-specific requirements and separation.
 validate_codex_skill_dir() {
     local skill_dir=$1
     local skill_name=$(basename "$skill_dir")
+    local agent_config_path
+    local home_agent_name
+    local output_expectation_count=0
+    local clarify_count=0
+    local lifecycle_count=0
 
     if ! validate_skill "$skill_dir/SKILL.md"; then
         return 1
@@ -466,33 +1144,42 @@ validate_codex_skill_dir() {
         return 1
     fi
 
-    if ! validate_codex_agent_config "$skill_name" "$skill_dir/agents/openai.yaml"; then
+    output_expectation_count=$(grep -c '^## Output Expectations$' "$skill_dir/SKILL.md" || true)
+    if [[ "$output_expectation_count" -gt 1 ]]; then
+        print_error "Codex skill has duplicate Output Expectations sections: $skill_name"
         return 1
     fi
 
-    if ! grep -q "js_repl" "$skill_dir/SKILL.md" || ! grep -q "codex.tool" "$skill_dir/SKILL.md"; then
-        print_error "Codex SKILL.md must mention js_repl + codex.tool runtime usage: $skill_name"
+    clarify_count=$(grep -c '^## When to Clarify First$' "$skill_dir/SKILL.md" || true)
+    if [[ "$clarify_count" -gt 1 ]]; then
+        print_error "Codex skill has duplicate When to Clarify First sections: $skill_name"
         return 1
     fi
 
-    if ! grep -q "wait for them to reach a terminal state before finalizing" "$skill_dir/SKILL.md"; then
-        print_error "Codex SKILL.md must require waiting for required sub-agents: $skill_name"
+    lifecycle_count=$(grep -c '^## Sub-Agent Lifecycle Rules$' "$skill_dir/SKILL.md" || true)
+    if [[ "$lifecycle_count" -gt 1 ]]; then
+        print_error "Codex skill has duplicate Sub-Agent Lifecycle Rules sections: $skill_name"
         return 1
     fi
 
-    if ! grep -q "Do not close a required running sub-agent merely because local evidence seems sufficient" "$skill_dir/SKILL.md"; then
-        print_error "Codex SKILL.md must forbid closing a running required sub-agent early: $skill_name"
+    while IFS= read -r agent_config_path; do
+        [[ -n "$agent_config_path" ]] || continue
+        home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+        if ! validate_codex_agent_config "$skill_name" "$home_agent_name" "$agent_config_path"; then
+            return 1
+        fi
+    done < <(list_skill_agent_config_files "$skill_name")
+
+    if ! skill_has_required_runtime_guidance "$skill_dir/SKILL.md"; then
+        print_error "Codex SKILL.md is missing required runtime guidance for Codex orchestration and delegation: $skill_name"
         return 1
     fi
 
-    if ! grep -qi "keep at most one live same-role agent" "$skill_dir/SKILL.md" || ! grep -qi "never spawn a second same-role sub-agent if one already exists" "$skill_dir/SKILL.md" || ! grep -qi 'always reuse it with `send_input` or `resume_agent`' "$skill_dir/SKILL.md" || ! grep -qi "resume a closed same-role agent before considering any new spawn" "$skill_dir/SKILL.md" || ! grep -q "fork_context" "$skill_dir/SKILL.md"; then
-        print_error "Codex SKILL.md must require strict same-role reuse, resume/send_input, and fork_context default-off: $skill_name"
-        return 1
-    fi
-
-    if ! grep -q "maintain a lightweight spawned-agent list" "$skill_dir/SKILL.md" || ! grep -q "send a robust handoff covering the exact objective" "$skill_dir/SKILL.md"; then
-        print_error "Codex SKILL.md must require spawned-agent tracking and robust delegation packets: $skill_name"
-        return 1
+    if [[ "$skill_name" != "reviewer" ]] && [[ "$skill_name" != "memory-status-reporter" ]] && grep -q '^## Output Expectations$' "$skill_dir/SKILL.md"; then
+        if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Output Expectations" 4; then
+            print_error "Codex skill is missing a sufficiently concrete Output Expectations section: $skill_name"
+            return 1
+        fi
     fi
 
     # Codex skills must reference Codex-native tools and agent profiles only.
@@ -505,41 +1192,75 @@ validate_codex_skill_dir() {
 
     case "$skill_name" in
         reviewer)
-            if ! grep -qi "Structure Matters" "$skill_dir/SKILL.md" || ! grep -qi "REQUIRE thin entrypoints" "$skill_dir/SKILL.md" || ! grep -qi "Coverage matches the touched layers" "$skill_dir/SKILL.md"; then
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Core Principles" "Structure Matters" || ! grep -q "REQUIRE thin entrypoints" "$skill_dir/SKILL.md" || ! grep -q "Coverage matches the touched layers" "$skill_dir/SKILL.md"; then
                 print_error "Reviewer skill is missing enforced structure or layered-testing guidance"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Multi-Agent Execution Pattern \(Completion-First\)" "main agent must verify" "send updated work back" "multiple parallel reviewer passes" "distinct purpose or workstream label"; then
+                print_error "Reviewer skill is missing multi-reviewer lane or re-review guidance"
                 return 1
             fi
             ;;
         software-development-life-cycle)
-            if ! grep -q "## Context and Structure Defaults" "$skill_dir/SKILL.md" || ! grep -q "## Modular Delivery Defaults" "$skill_dir/SKILL.md" || ! grep -qi "Keep entrypoints thin" "$skill_dir/SKILL.md"; then
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Context and Structure Defaults" "Keep entrypoints thin"; then
                 print_error "Software-development-life-cycle skill is missing context or modular-delivery defaults"
+                return 1
+            fi
+            if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Context and Structure Defaults" 4 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Modular Delivery Defaults" 3; then
+                print_error "Software-development-life-cycle skill is missing the expected depth in context or modular-delivery defaults"
                 return 1
             fi
             ;;
         web-development-life-cycle)
-            if ! grep -q "## Structure Defaults" "$skill_dir/SKILL.md" || ! grep -qi "server actions" "$skill_dir/SKILL.md" || ! grep -qi "higher-layer confirmation" "$skill_dir/SKILL.md"; then
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Structure Defaults" "server actions" "higher-layer confirmation"; then
                 print_error "Web-development-life-cycle skill is missing structure or layered-test defaults"
+                return 1
+            fi
+            if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Structure Defaults" 4 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Delivery Heuristics by Product Surface" 5 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Delivery Decision Matrix" 5; then
+                print_error "Web-development-life-cycle skill is missing the expected depth in structure or delivery heuristics"
+                return 1
+            fi
+            ;;
+        mobile-development-life-cycle)
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Structure Defaults" "permission" "offline" "higher-layer confirmation"; then
+                print_error "Mobile-development-life-cycle skill is missing structure, lifecycle, or test defaults"
+                return 1
+            fi
+            if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Structure Defaults" 4 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Delivery Heuristics by Mobile Surface" 5 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Mobile Delivery Decision Matrix" 5; then
+                print_error "Mobile-development-life-cycle skill is missing the expected depth in structure or delivery heuristics"
                 return 1
             fi
             ;;
         backend-and-data-architecture)
-            if ! grep -q "## Structure Defaults" "$skill_dir/SKILL.md" || ! grep -qi "transport adapters" "$skill_dir/SKILL.md" || ! grep -qi "services or use cases" "$skill_dir/SKILL.md"; then
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Structure Defaults" "transport adapters" "services or use cases"; then
                 print_error "Backend-and-data-architecture skill is missing structure defaults"
+                return 1
+            fi
+            if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Structure Defaults" 4; then
+                print_error "Backend-and-data-architecture skill is missing the expected depth in structure defaults"
                 return 1
             fi
             ;;
         qa-and-automation-engineer)
-            if ! grep -q "## Layered Coverage Defaults" "$skill_dir/SKILL.md" || ! grep -qi "higher-layer confirmation" "$skill_dir/SKILL.md" || ! grep -qi "module or layer they protect" "$skill_dir/SKILL.md"; then
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Layered Coverage Defaults" "higher-layer confirmation" "module or layer they protect"; then
                 print_error "QA-and-automation-engineer skill is missing layered-coverage defaults"
+                return 1
+            fi
+            if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Layered Coverage Defaults" 4; then
+                print_error "QA-and-automation-engineer skill is missing the expected depth in layered-coverage defaults"
                 return 1
             fi
             ;;
         ui-design-systems-and-responsive-interfaces)
-            if ! grep -q "## Design Intelligence Packet" "$skill_dir/SKILL.md" || ! grep -q "## Brownfield Redesign Defaults" "$skill_dir/SKILL.md" || ! grep -q "Storybook, Ladle, or Histoire" "$skill_dir/SKILL.md"; then
-                print_error "UI skill is missing design-intelligence, brownfield, or component-verification defaults"
+            if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Design Intelligence Packet" 5 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Brownfield Redesign Defaults" 4; then
+                print_error "UI skill is missing the expected depth in design-intelligence or brownfield defaults"
                 return 1
             fi
-            if ! grep -q "## Professional Polish Checks" "$skill_dir/SKILL.md" || ! grep -q "No emoji as product UI icons" "$skill_dir/SKILL.md"; then
+            if ! grep -q "Storybook, Ladle, or Histoire" "$skill_dir/SKILL.md"; then
+                print_error "UI skill is missing component-verification defaults"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Professional Polish Checks" "No emoji as product UI icons"; then
                 print_error "UI skill is missing professional-polish delivery checks"
                 return 1
             fi
@@ -557,11 +1278,15 @@ validate_codex_skill_dir() {
             fi
             ;;
         ux-research-and-experience-strategy)
-            if ! grep -q "## Experience Brief Defaults" "$skill_dir/SKILL.md" || ! grep -q "## Brownfield Redesign and Artifact Persistence" "$skill_dir/SKILL.md" || ! grep -q "Storybook, Ladle, Histoire" "$skill_dir/SKILL.md"; then
-                print_error "UX skill is missing experience-brief, brownfield, or validation-loop defaults"
+            if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Experience Brief Defaults" 5 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Brownfield Redesign and Artifact Persistence" 4; then
+                print_error "UX skill is missing the expected depth in experience-brief or brownfield defaults"
                 return 1
             fi
-            if ! grep -q "## Decision Confidence and Recovery Checks" "$skill_dir/SKILL.md" || ! grep -q "Errors preserve progress" "$skill_dir/SKILL.md"; then
+            if ! grep -q "Storybook, Ladle, Histoire" "$skill_dir/SKILL.md"; then
+                print_error "UX skill is missing validation-loop defaults"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Decision Confidence and Recovery Checks" "Errors preserve progress"; then
                 print_error "UX skill is missing decision-confidence or recovery checks"
                 return 1
             fi
@@ -585,9 +1310,12 @@ validate_codex_skill_dir() {
 
 validate_codex_agent_config() {
     local skill_name=$1
-    local config_file=$2
+    local home_agent_name=$2
+    local config_file=$3
     local expected_model="gpt-5.4"
     local expected_reasoning="high"
+    local configured_model=""
+    local expected_override_model=""
 
     if [[ -f "$CODEX_TARGET/config.toml" ]]; then
         local detected_model
@@ -603,49 +1331,30 @@ validate_codex_agent_config() {
         fi
     fi
 
+    expected_override_model="$(spark_override_model_for_home_agent "$home_agent_name" 2>/dev/null || true)"
+    expected_reasoning="$(expected_reasoning_for_home_agent "$home_agent_name" "$expected_reasoning")"
+
     if grep -q "^model:" "$config_file"; then
-        print_error "Codex skill config should not pin model; rely on workspace default $expected_model: $skill_name"
+        configured_model=$(awk -F'"' '/^model: / {print $2; exit}' "$config_file")
+        print_error "Codex skill config should not pin model in agents/openai.yaml: $home_agent_name ($configured_model)"
         return 1
     fi
 
     if ! grep -q "^reasoning_effort: \"$expected_reasoning\"$" "$config_file"; then
-        print_error "Unexpected reasoning_effort for Codex skill $skill_name (expected $expected_reasoning to match the main agent baseline)"
+        print_error "Unexpected reasoning_effort for Codex skill $skill_name (expected $expected_reasoning for $home_agent_name)"
         return 1
     fi
 
-    if ! grep -q "js_repl" "$config_file" || ! grep -q "codex.tool" "$config_file"; then
-        print_error "Codex agent prompt must mention js_repl + codex.tool runtime usage: $skill_name"
+    if ! agent_config_has_required_runtime_guidance "$config_file"; then
+        print_error "Codex agent prompt is missing required runtime guidance for research, orchestration, or prompt alignment: $skill_name"
         return 1
     fi
 
-    if ! grep -q "Always research current external information before trusting internal knowledge" "$config_file"; then
-        print_error "Codex agent prompt must require current external research: $skill_name"
-        return 1
-    fi
-
-    if ! grep -q "wait for them to reach a terminal state before finalizing" "$config_file"; then
-        print_error "Codex agent prompt must require waiting for required sub-agents: $skill_name"
-        return 1
-    fi
-
-    if ! grep -q "Do not close a required running sub-agent merely because local evidence seems sufficient" "$config_file"; then
-        print_error "Codex agent prompt must forbid closing a running required sub-agent early: $skill_name"
-        return 1
-    fi
-
-    if ! grep -q "keep at most one live same-role agent" "$config_file" || ! grep -q "never spawn a second same-role sub-agent if one already exists" "$config_file" || ! grep -q "always reuse it with send_input or resume_agent" "$config_file" || ! grep -q "resume a closed same-role agent before considering any new spawn" "$config_file" || ! grep -q "fork_context off unless the exact parent thread history is required" "$config_file"; then
-        print_error "Codex agent prompt must require strict same-role reuse, resume/send_input, and fork_context default-off: $skill_name"
-        return 1
-    fi
-
-    if ! grep -q "maintain a lightweight spawned-agent list" "$config_file" || ! grep -q "send a robust handoff covering the exact objective" "$config_file"; then
-        print_error "Codex agent prompt must require spawned-agent tracking and robust delegation packets: $skill_name"
-        return 1
-    fi
-
-    if ! grep -q "working brief" "$config_file" || ! grep -q "test-first when practical" "$config_file"; then
-        print_error "Codex agent prompt must require prompt alignment and test-first guidance: $skill_name"
-        return 1
+    if [[ "$home_agent_name" == "reviewer" ]]; then
+        if ! grep -q "main agent must verify" "$config_file" || ! grep -q "may send updated work back" "$config_file"; then
+            print_error "Reviewer-family prompts must require main-agent verification and allow re-review after updates: $home_agent_name"
+            return 1
+        fi
     fi
 
     if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && ! grep -q "Raise the design bar: act like a strong product designer" "$config_file"; then
@@ -673,8 +1382,8 @@ validate_codex_agent_config() {
         return 1
     fi
 
-    if [[ "$skill_name" == "memory-status-reporter" ]] && ! grep -q "tool-use mistakes" "$config_file"; then
-        print_error "Memory status prompt must mention tool-use mistakes explicitly: $skill_name"
+    if [[ "$skill_name" == "memory-status-reporter" ]] && { ! grep -q "tool-use mistakes" "$config_file" || ! grep -q "Rewarded Patterns" "$config_file" || ! grep -q "Research Cache Health" "$config_file"; }; then
+        print_error "Memory status prompt must mention tool-use mistakes, rewarded patterns, and research cache health: $skill_name"
         return 1
     fi
 
@@ -727,6 +1436,11 @@ validate_codex_guidance_file() {
             return 1
         fi
 
+        if ! grep -qi "Reinforcement Memory (Reward/Penalty Loop)" "$file" || ! grep -qi "Research Cache Requirement" "$file" || ! grep -qi "Freshness Rule" "$file"; then
+            print_error "Missing reinforcement-memory, research-cache, or freshness policy in AGENTS.md"
+            return 1
+        fi
+
         if ! grep -qi "maintain a lightweight per-project spawned-agent list" "$file"; then
             print_error "Missing spawned-agent registry policy in AGENTS.md"
             return 1
@@ -744,6 +1458,23 @@ validate_codex_guidance_file() {
 
         if ! grep -qi "working brief" "$file" || ! grep -qi "Tool Mistakes Count" "$file" || ! grep -qi "Prefer test-first when practical" "$file" || ! grep -qi "Context Retrieval Ladder" "$file" || ! grep -qi "Learning Snapshot" "$file" || ! grep -qi "Prefer modular structure" "$file" || ! grep -qi "Keep route handlers, controllers, pages, CLI entrypoints, and main scripts short" "$file"; then
             print_error "Missing prompt-alignment, context-efficiency, modularity, thin-entrypoint, tool-mistake, or learning-snapshot policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "parallel reviewer validation" "$file" || ! grep -qi "spawn multiple" "$file" || ! grep -qi "reviewer output before acting" "$file"; then
+            print_error "Missing multi-reviewer lane policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "Do not pin a specific model inside ordinary root Codex" "$file" || ! grep -qi "Home agent TOMLs should inherit model and reasoning from the main config" "$file" || ! grep -qi "cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly" "$file"; then
+            print_error "Missing root model-inheritance or runtime model-selection boundary policy in AGENTS.md"
+            return 1
+        fi
+    fi
+
+    if [[ "$(basename "$file")" == "README.md" ]]; then
+        if ! grep -qi "Research cache" "$file" || ! grep -qi "Reinforcement memory" "$file" || ! grep -qi "rewarded patterns" "$file"; then
+            print_error "Missing research-cache or reinforcement-memory workflow in README.md"
             return 1
         fi
     fi
@@ -836,7 +1567,7 @@ extract_codex_openai_value() {
     local openai_yaml_path=$1
     local field_name=$2
 
-    python3 - "$openai_yaml_path" "$field_name" <<'PY'
+    run_python - "$openai_yaml_path" "$field_name" <<'PY'
 from pathlib import Path
 import json
 import re
@@ -847,6 +1578,8 @@ field_name = sys.argv[2]
 openai_yaml_text = openai_yaml_path.read_text(encoding="utf-8")
 
 field_patterns = {
+    "model": r'^model:\s*(".*")\s*$',
+    "reasoning_effort": r'^reasoning_effort:\s*(".*")\s*$',
     "short_description": r'^\s+short_description:\s*(".*")\s*$',
     "default_prompt": r'^\s+default_prompt:\s*(".*")\s*$',
 }
@@ -863,42 +1596,78 @@ print(json.loads(field_match.group(1)))
 PY
 }
 
-sync_codex_home_agent_from_openai() {
+extract_codex_openai_optional_value() {
+    local openai_yaml_path=$1
+    local field_name=$2
+
+    extract_codex_openai_value "$openai_yaml_path" "$field_name" 2>/dev/null || true
+}
+
+sync_codex_home_agent_from_yaml() {
     local skill_name=$1
-    local openai_yaml_path="$CODEX_SOURCE/$skill_name/agents/openai.yaml"
-    local home_agent_file="$CODEX_TARGET/agents/$skill_name.toml"
+    local openai_yaml_path=$2
+    local home_agent_name=$3
+    local home_agent_file="$CODEX_TARGET/agents/$home_agent_name.toml"
 
     if [[ ! -f "$openai_yaml_path" ]]; then
-        print_warning "Skipping home agent sync for $skill_name because $openai_yaml_path is missing"
+        print_warning "Skipping home agent sync for $home_agent_name because $openai_yaml_path is missing"
         return 0
     fi
 
     local default_prompt
+    local pinned_model
+    local configured_reasoning
     default_prompt=$(extract_codex_openai_value "$openai_yaml_path" "default_prompt") || {
-        print_error "Unable to extract default_prompt for $skill_name"
+        print_error "Unable to extract default_prompt for $home_agent_name"
         return 1
     }
+    pinned_model="$(extract_codex_openai_optional_value "$openai_yaml_path" "model")"
+    configured_reasoning="$(extract_codex_openai_optional_value "$openai_yaml_path" "reasoning_effort")"
 
-    python3 - "$home_agent_file" "$default_prompt" <<'PY'
+    run_python - "$home_agent_file" "$default_prompt" "$pinned_model" "$configured_reasoning" <<'PY'
 from pathlib import Path
 import sys
 
 home_agent_file = Path(sys.argv[1])
 default_prompt = sys.argv[2]
+pinned_model = sys.argv[3]
+configured_reasoning = sys.argv[4]
 
 if "'''" in default_prompt:
     raise SystemExit("Triple single quotes are not supported inside developer_instructions")
 
 home_agent_file.parent.mkdir(parents=True, exist_ok=True)
-home_agent_file.write_text(
-    "developer_instructions = '''\n"
-    f"{default_prompt}\n"
-    "'''\n",
-    encoding="utf-8",
-)
+output_lines = []
+if pinned_model:
+    output_lines.append(f'model = "{pinned_model}"')
+if pinned_model and configured_reasoning:
+    output_lines.append(f'model_reasoning_effort = "{configured_reasoning}"')
+output_lines.append("developer_instructions = '''")
+output_lines.append(default_prompt)
+output_lines.append("'''")
+home_agent_file.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
 PY
 
-    print_success "Synced $skill_name home agent config to Codex"
+    print_success "Synced $home_agent_name home agent config to Codex"
+    return 0
+}
+
+sync_codex_home_agents_for_skill() {
+    local skill_name=$1
+    local agent_config_path
+    local home_agent_name
+
+    remove_stale_home_agents_for_skill "$skill_name"
+
+    while IFS= read -r agent_config_path; do
+        [[ -n "$agent_config_path" ]] || continue
+        home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+        if ! sync_codex_home_agent_from_yaml "$skill_name" "$agent_config_path" "$home_agent_name"; then
+            print_error "Failed to sync $home_agent_name home agent config"
+            return 1
+        fi
+    done < <(list_skill_agent_config_files "$skill_name")
+
     return 0
 }
 
@@ -923,7 +1692,7 @@ sync_memory_status_reporter_home_wiring() {
     required_execution_lines_file="$(mktemp)"
     printf '%s\n' "${MEMORY_STATUS_REQUIRED_CONFIG_LINES[@]:1}" > "$required_execution_lines_file"
 
-    python3 - "$home_config_file" "$routing_line" "$short_description" "$required_execution_lines_file" <<'PY'
+    run_python - "$home_config_file" "$routing_line" "$short_description" "$required_execution_lines_file" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -960,6 +1729,19 @@ if execution_policy_anchor in config_text:
     for required_line in required_execution_lines:
         if required_line not in config_text:
             config_text = config_text.replace(execution_policy_anchor, f"{execution_policy_anchor}\n{required_line}", 1)
+else:
+    missing_execution_lines = [
+        required_line
+        for required_line in required_execution_lines
+        if required_line not in config_text
+    ]
+    if missing_execution_lines:
+        developer_instructions_close = "\n'''"
+        execution_policy_block = "\n\nExecution policy:\n" + "\n".join(missing_execution_lines)
+        if developer_instructions_close in config_text:
+            config_text = config_text.replace(developer_instructions_close, execution_policy_block + developer_instructions_close, 1)
+        else:
+            config_text = config_text.rstrip() + execution_policy_block + "\n"
 
 memory_status_agent_block = (
     "[agents.memory-status-reporter]\n"
@@ -984,21 +1766,7 @@ PY
     return 0
 }
 
-# Function to sync Codex skills
-sync_codex() {
-    print_info "Syncing Codex skills..."
-
-    # Create target directory if it doesn't exist
-    mkdir -p "$CODEX_TARGET"
-    mkdir -p "$CODEX_TARGET/skills"
-    mkdir -p "$CODEX_TARGET/agents"
-
-    if ! validate_codex_repo_docs; then
-        print_error "Codex guidance validation failed, aborting Codex sync"
-        return 1
-    fi
-
-    # Sync AGENTS.md
+sync_root_guidance_files() {
     if [[ -f "$CODEX_SOURCE/AGENTS.md" ]]; then
         cp "$CODEX_SOURCE/AGENTS.md" "$CODEX_TARGET/AGENTS.md"
         print_success "Synced AGENTS.md to Codex"
@@ -1006,97 +1774,164 @@ sync_codex() {
         print_warning "AGENTS.md not found in source"
     fi
 
-    # Sync skill routing
     if [[ -f "$CODEX_SOURCE/00-skill-routing-and-escalation.md" ]]; then
         cp "$CODEX_SOURCE/00-skill-routing-and-escalation.md" "$CODEX_TARGET/00-skill-routing-and-escalation.md"
         print_success "Synced skill routing to Codex"
     fi
+}
 
-    # Sync each skill directory
-    for skill_dir in "$CODEX_SOURCE"/*/; do
-        skill_name=$(basename "$skill_dir")
+sync_skill_to_codex() {
+    local skill_name=$1
+    local source_skill_directory="$CODEX_SOURCE/$skill_name"
+    local target_skill_directory="$CODEX_TARGET/skills/$skill_name"
 
-        # Skip if not a skill directory (no SKILL.md)
-        if [[ ! -f "$skill_dir/SKILL.md" ]]; then
-            continue
-        fi
+    print_info "Syncing $skill_name..."
 
-        print_info "Syncing $skill_name..."
-
-        # Validate skill
-        if ! validate_codex_skill_dir "$skill_dir"; then
-            print_error "Validation failed for $skill_name, aborting Codex sync to prevent stale home state"
-            return 1
-        fi
-
-        # Legacy cleanup: older versions synced to ~/.codex/<skill>/ instead of ~/.codex/skills/<skill>/.
-        if [[ -d "$CODEX_TARGET/$skill_name" ]]; then
-            print_warning "Removing legacy Codex skill directory: $CODEX_TARGET/$skill_name"
-            rm -rf "$CODEX_TARGET/$skill_name"
-        fi
-
-        # Refresh target to the latest: remove prior sync to prevent stale files.
-        if [[ -d "$CODEX_TARGET/skills/$skill_name" ]]; then
-            rm -rf "$CODEX_TARGET/skills/$skill_name"
-        fi
-
-        # Create target skill directory (Codex expects skills under ~/.codex/skills/<skill>/)
-        mkdir -p "$CODEX_TARGET/skills/$skill_name"
-
-        copy_managed_skill_content "$skill_dir" "$CODEX_TARGET/skills/$skill_name"
-
-        if ! sync_codex_home_agent_from_openai "$skill_name"; then
-            print_error "Failed to sync $skill_name home agent config"
-            return 1
-        fi
-
-        print_success "Synced $skill_name to Codex"
-    done
-
-    if ! sync_memory_status_reporter_home_wiring; then
-        print_error "Failed to sync memory-status-reporter live home wiring"
+    if ! validate_codex_skill_dir "$source_skill_directory"; then
+        print_error "Validation failed for $skill_name, aborting Codex sync to prevent stale home state"
         return 1
     fi
 
-    write_install_metadata
+    if [[ -d "$CODEX_TARGET/$skill_name" ]]; then
+        print_warning "Removing legacy Codex skill directory: $CODEX_TARGET/$skill_name"
+        rm -rf "$CODEX_TARGET/$skill_name"
+    fi
+
+    if [[ -d "$target_skill_directory" ]]; then
+        rm -rf "$target_skill_directory"
+    fi
+
+    mkdir -p "$target_skill_directory"
+    copy_managed_skill_content "$source_skill_directory" "$target_skill_directory"
+
+    if ! sync_codex_home_agents_for_skill "$skill_name"; then
+        print_error "Failed to sync $skill_name home agents"
+        return 1
+    fi
+
+    print_success "Synced $skill_name to Codex"
+    return 0
+}
+
+# Function to sync Codex skills
+sync_codex() {
+    local skill_name
+
+    if ! ensure_sync_runtime_prerequisites; then
+        print_error "Runtime prerequisites failed, aborting Codex sync"
+        return 1
+    fi
+
+    mkdir -p "$CODEX_TARGET"
+    mkdir -p "$CODEX_TARGET/skills"
+    mkdir -p "$CODEX_TARGET/agents"
+
+    run_task_line "validate docs" validate_codex_repo_docs || {
+        print_error "Codex guidance validation failed, aborting Codex sync"
+        return 1
+    }
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        run_task_line "remove stale $skill_name" remove_skill_installation "$skill_name" || return 1
+    done < <(list_removed_repo_managed_skill_names)
+
+    run_task_line "sync root guidance" sync_root_guidance_files || return 1
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        run_task_line "sync $skill_name" sync_skill_to_codex "$skill_name" || return 1
+    done < <(list_repo_skill_names)
+
+    run_task_line "sync memory wiring" sync_memory_status_reporter_home_wiring || {
+        print_error "Failed to sync memory-status-reporter live home wiring"
+        return 1
+    }
+
+    run_task_line "write install metadata" write_install_metadata || return 1
+    run_task_line "track managed skills" write_managed_skill_inventory_from_repo || return 1
+    run_task_line "track managed agents" write_managed_home_agent_inventory_from_repo || return 1
 
     if ! verify_pack_checksums; then
         print_error "MD5 verification failed after sync; Codex home may be partial"
         return 1
     fi
 
-    print_success "Codex skills sync complete!"
+    print_success "Codex skills sync complete"
 }
-# Function to validate all skills
-validate_all() {
-    print_info "Validating all skills..."
 
-    local failed=0
+sync_codex_delta_update() {
+    local root_files_changed=$1
+    shift
+    local changed_skills=("$@")
+    local removed_skills=()
+    local skill_name
 
-    if ! validate_codex_repo_docs; then
-        ((failed+=1))
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        removed_skills+=("$skill_name")
+    done < <(list_removed_repo_managed_skill_names)
+
+    if [[ "$root_files_changed" == "true" ]]; then
+        sync_root_guidance_files
     fi
 
-    # Validate Codex skills
-    print_info "Validating Codex skills..."
-    for skill_dir in "$CODEX_SOURCE"/*/; do
-        if [[ -f "$skill_dir/SKILL.md" ]]; then
-            if ! validate_codex_skill_dir "$skill_dir"; then
-                ((failed+=1))
-            fi
+    if [[ ${#removed_skills[@]} -gt 0 ]]; then
+        print_info "Removing repo-managed skills no longer present in source: ${removed_skills[*]}"
+        for skill_name in "${removed_skills[@]}"; do
+            remove_skill_installation "$skill_name"
+        done
+    fi
+
+    for skill_name in "${changed_skills[@]}"; do
+        if ! sync_skill_to_codex "$skill_name"; then
+            return 1
         fi
     done
 
-    if [[ $failed -eq 0 ]]; then
-        print_success "All skills validated successfully!"
-        return 0
-    else
-        print_error "$failed skill(s) failed validation"
+    if [[ "$root_files_changed" == "true" ]] || [[ " ${changed_skills[*]} " == *" memory-status-reporter "* ]]; then
+        if ! sync_memory_status_reporter_home_wiring; then
+            print_error "Failed to sync memory-status-reporter live home wiring"
+            return 1
+        fi
+    fi
+
+    write_install_metadata
+    write_managed_skill_inventory_from_repo
+    write_managed_home_agent_inventory_from_repo
+
+    if ! verify_pack_checksums; then
+        print_error "MD5 verification failed after update; Codex home may be partial"
         return 1
     fi
+
+    print_success "Codex skills delta update complete!"
+    return 0
+}
+# Function to validate all skills
+validate_all() {
+    local failed=0
+    local failed_skill_name
+
+    run_task_line "validate docs" validate_codex_repo_docs || ((failed+=1))
+
+    while IFS= read -r failed_skill_name; do
+        [[ -n "$failed_skill_name" ]] || continue
+        ((failed+=1))
+    done < <(collect_failed_skill_names_parallel)
+
+    if [[ $failed -eq 0 ]]; then
+        print_success "All skills validated successfully"
+        return 0
+    fi
+
+    print_error "$failed skill(s) failed validation"
+    return 1
 }
 
-skill_needs_update() {
+PARALLEL_MANIFEST_STATUS_DIRECTORY=""
+
+run_manifest_check_worker() {
     local skill_name=$1
     local source_directory="$CODEX_SOURCE/$skill_name"
     local target_directory="$CODEX_TARGET/skills/$skill_name"
@@ -1104,6 +1939,7 @@ skill_needs_update() {
     local target_manifest
 
     if [[ ! -d "$target_directory" ]]; then
+        printf '%s\n' "$skill_name" > "$PARALLEL_MANIFEST_STATUS_DIRECTORY/$skill_name.changed"
         return 0
     fi
 
@@ -1113,13 +1949,72 @@ skill_needs_update() {
     build_skill_manifest "$source_directory" > "$source_manifest"
     build_skill_manifest "$target_directory" > "$target_manifest"
 
-    if diff -u "$source_manifest" "$target_manifest" >/dev/null; then
-        rm -f "$source_manifest" "$target_manifest"
-        return 1
+    if ! diff -u "$source_manifest" "$target_manifest" >/dev/null; then
+        printf '%s\n' "$skill_name" > "$PARALLEL_MANIFEST_STATUS_DIRECTORY/$skill_name.changed"
     fi
 
     rm -f "$source_manifest" "$target_manifest"
-    return 0
+}
+
+collect_changed_skills_parallel() {
+    local status_directory
+    local skill_name
+    local worker_limit
+    local parallel_exit_code=0
+
+    status_directory="$(mktemp -d)"
+    PARALLEL_MANIFEST_STATUS_DIRECTORY="$status_directory"
+    repo_skill_names_array
+    worker_limit="$(parallel_worker_limit)"
+
+    if [[ ${#REPO_SKILL_NAMES[@]} -eq 0 ]]; then
+        rm -rf "$status_directory"
+        return 0
+    fi
+
+    if ! run_items_in_parallel run_manifest_check_worker "$worker_limit" "${REPO_SKILL_NAMES[@]}"; then
+        parallel_exit_code=1
+    fi
+
+    for skill_name in "${REPO_SKILL_NAMES[@]}"; do
+        if [[ -f "$status_directory/$skill_name.changed" ]]; then
+            printf '%s\n' "$skill_name"
+        fi
+    done
+
+    rm -rf "$status_directory"
+    PARALLEL_MANIFEST_STATUS_DIRECTORY=""
+    return $parallel_exit_code
+}
+
+skill_needs_update() {
+    local skill_name=$1
+    local changed_skill_name
+
+    while IFS= read -r changed_skill_name; do
+        [[ -n "$changed_skill_name" ]] || continue
+        if [[ "$changed_skill_name" == "$skill_name" ]]; then
+            return 0
+        fi
+    done < <(collect_changed_skills_parallel)
+
+    return 1
+}
+
+collect_removed_skills() {
+    local removed_skills=()
+    local skill_name
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        removed_skills+=("$skill_name")
+    done < <(list_removed_repo_managed_skill_names)
+
+    if [[ ${#removed_skills[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    printf '%s\n' "${removed_skills[@]}"
 }
 
 core_files_need_update() {
@@ -1143,6 +2038,7 @@ core_files_need_update() {
 
 show_checksum_status() {
     local changed_skills=()
+    local removed_skills=()
     local skill_name
 
     while IFS= read -r skill_name; do
@@ -1163,49 +2059,113 @@ show_checksum_status() {
     else
         echo "  skill checksum status: drift in ${changed_skills[*]}"
     fi
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        removed_skills+=("$skill_name")
+    done < <(list_removed_repo_managed_skill_names)
+
+    if [[ ${#removed_skills[@]} -eq 0 ]]; then
+        echo "  stale managed skills: none"
+    else
+        echo "  stale managed skills: ${removed_skills[*]}"
+    fi
+}
+
+remove_home_agent_installation() {
+    local skill_name=$1
+    local home_agent_name=$2
+
+    if [[ -f "$CODEX_TARGET/agents/$home_agent_name.toml" ]]; then
+        rm -f "$CODEX_TARGET/agents/$home_agent_name.toml"
+    fi
+
+    remove_home_agent_from_managed_inventory "$skill_name" "$home_agent_name"
+}
+
+remove_stale_home_agents_for_skill() {
+    local skill_name=$1
+    local tracked_home_agent_name
+    local expected_home_agent_names
+
+    expected_home_agent_names="$(list_skill_agent_config_files "$skill_name" | while IFS= read -r agent_config_path; do
+        [[ -n "$agent_config_path" ]] || continue
+        home_agent_name_from_agent_config "$skill_name" "$agent_config_path"
+    done)"
+
+    while IFS= read -r tracked_home_agent_name; do
+        [[ -n "$tracked_home_agent_name" ]] || continue
+        if ! grep -qxF -- "$tracked_home_agent_name" <<< "$expected_home_agent_names"; then
+            if [[ "$tracked_home_agent_name" == "memory-status-reporter" ]]; then
+                strip_memory_status_reporter_home_wiring
+            fi
+            remove_home_agent_installation "$skill_name" "$tracked_home_agent_name"
+        fi
+    done < <(list_tracked_home_agent_names_for_skill "$skill_name")
 }
 
 strip_memory_status_reporter_home_wiring() {
     local home_config_file="$CODEX_TARGET/config.toml"
     local routing_line="${MEMORY_STATUS_REQUIRED_CONFIG_LINES[0]}"
+    local required_execution_lines_file
 
     [[ -f "$home_config_file" ]] || return 0
 
-    python3 - "$home_config_file" "$routing_line" <<'PY'
+    required_execution_lines_file="$(mktemp)"
+    printf '%s\n' "${MEMORY_STATUS_REQUIRED_CONFIG_LINES[@]:1}" > "$required_execution_lines_file"
+
+    run_python - "$home_config_file" "$routing_line" "$required_execution_lines_file" <<'PY'
 from pathlib import Path
 import re
 import sys
 
 config_path = Path(sys.argv[1])
 routing_line = sys.argv[2]
+required_execution_lines = [
+    line
+    for line in Path(sys.argv[3]).read_text(encoding="utf-8").splitlines()
+    if line.strip()
+]
 config_text = config_path.read_text(encoding="utf-8")
 config_text = config_text.replace(routing_line + "\n", "")
 config_text = config_text.replace("\n" + routing_line, "")
+for required_line in required_execution_lines:
+    config_text = config_text.replace(required_line + "\n", "")
+config_text = re.sub(r"\nExecution policy:\n(?=\n|''')", "\n", config_text)
 config_text = re.sub(r"(?ms)^\[agents\.memory-status-reporter\]\n.*?(?=^\[|\Z)", "", config_text)
 config_text = re.sub(r"\n{3,}", "\n\n", config_text).strip() + "\n"
 config_path.write_text(config_text, encoding="utf-8")
 PY
+
+    rm -f "$required_execution_lines_file"
 }
 
 remove_skill_installation() {
     local skill_name=$1
+    local home_agent_name
+
+    if [[ "$skill_name" == "memory-status-reporter" ]] && [[ -f "$CODEX_TARGET/config.toml" ]]; then
+        ensure_python_launcher || return 1
+    fi
 
     if [[ -d "$CODEX_TARGET/skills/$skill_name" ]]; then
         rm -rf "$CODEX_TARGET/skills/$skill_name"
     fi
 
-    if [[ -f "$CODEX_TARGET/agents/$skill_name.toml" ]]; then
-        rm -f "$CODEX_TARGET/agents/$skill_name.toml"
-    fi
+    while IFS= read -r home_agent_name; do
+        [[ -n "$home_agent_name" ]] || continue
+        if [[ "$home_agent_name" == "memory-status-reporter" ]]; then
+            strip_memory_status_reporter_home_wiring
+        fi
+        remove_home_agent_installation "$skill_name" "$home_agent_name"
+    done < <(list_tracked_home_agent_names_for_skill "$skill_name")
 
     rm -f "$(skill_manager_manifest_directory)/source/$skill_name.md5" 2>/dev/null || true
     rm -f "$(skill_manager_manifest_directory)/target/$skill_name.md5" 2>/dev/null || true
 
-    if [[ "$skill_name" == "memory-status-reporter" ]]; then
-        strip_memory_status_reporter_home_wiring
-    fi
+    remove_skill_from_managed_inventory "$skill_name"
 
-    if [[ -d "$CODEX_TARGET/skills/$skill_name" ]] || [[ -f "$CODEX_TARGET/agents/$skill_name.toml" ]]; then
+    if [[ -d "$CODEX_TARGET/skills/$skill_name" ]]; then
         print_error "Failed to remove skill: $skill_name"
         return 1
     fi
@@ -1219,7 +2179,7 @@ remove_skill_pack() {
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
         remove_skill_installation "$skill_name"
-    done < <(list_repo_skill_names)
+    done < <(list_tracked_managed_skill_names)
 
     rm -f "$CODEX_TARGET/AGENTS.md"
     rm -f "$CODEX_TARGET/00-skill-routing-and-escalation.md"
@@ -1234,37 +2194,45 @@ remove_skill_pack() {
 }
 
 install_codex() {
-    print_info "Installing Codex skill pack into $CODEX_TARGET"
-    validate_all
-    sync_codex
+    run_task_line "validate" validate_all || return 1
+    run_task_line "install to $CODEX_TARGET" sync_codex
 }
 
 update_codex() {
     local changed_skills=()
+    local removed_skills=()
     local skill_name
+    local root_files_changed="false"
+
+    if ! ensure_sync_runtime_prerequisites; then
+        print_error "Runtime prerequisites failed, aborting update"
+        return 1
+    fi
+
+    run_task_line "validate" validate_all || return 1
 
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
-        if skill_needs_update "$skill_name"; then
-            changed_skills+=("$skill_name")
-        fi
-    done < <(list_repo_skill_names)
+        changed_skills+=("$skill_name")
+    done < <(collect_changed_skills_parallel)
 
-    if ! core_files_need_update && [[ ${#changed_skills[@]} -eq 0 ]]; then
-        print_success "Installed skill pack is already up to date."
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        removed_skills+=("$skill_name")
+    done < <(list_removed_repo_managed_skill_names)
+
+    if core_files_need_update; then
+        root_files_changed="true"
+    fi
+
+    if [[ "$root_files_changed" == "false" ]] && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]]; then
+        print_success "Installed skill pack is already up to date"
         verify_pack_checksums
         return 0
     fi
 
-    print_info "Repo version: $(get_repo_version)"
-    print_info "Installed version: $(get_installed_version)"
-    if [[ ${#changed_skills[@]} -gt 0 ]]; then
-        print_info "Changed skills detected: ${changed_skills[*]}"
-    else
-        print_info "Core Codex home files changed; refreshing the installed skill pack."
-    fi
-
-    sync_codex
+    print_info "update plan: repo=$(get_repo_version) installed=$(get_installed_version) changed=${#changed_skills[@]} removed=${#removed_skills[@]} root_refresh=$root_files_changed"
+    sync_codex_delta_update "$root_files_changed" "${changed_skills[@]}"
 }
 
 choose_installed_skill_interactively() {
@@ -1308,36 +2276,36 @@ run_interactive_menu() {
 
     while true; do
         echo ""
-        print_info "Codex Skill Manager"
-        echo "  1) Install skill pack"
-        echo "  2) Sync skill pack"
-        echo "  3) Update installed skill pack"
-        echo "  4) Remove installed skills"
-        echo "  5) Verify MD5 checksums"
-        echo "  6) Show status"
-        echo "  7) Exit"
+        print_header "Codex Skill Manager"
+        print_menu_option "i"  "install"
+        print_menu_option "s"  "sync"
+        print_menu_option "u"  "update"
+        print_menu_option "r"  "remove"
+        print_menu_option "v"  "verify"
+        print_menu_option "st" "status"
+        print_menu_option "q"  "quit"
         echo ""
-        read -r -p "Choose an option: " menu_choice
+        read -r -p "select: " menu_choice
 
         case "$menu_choice" in
-            1)
+            i|install|1)
                 if prompt_yes_no "Install the repo skill pack into $CODEX_TARGET?"; then
                     install_codex
                 fi
                 ;;
-            2)
+            s|sync|2)
                 if prompt_yes_no "Force-sync the repo skill pack into $CODEX_TARGET?"; then
                     sync_codex
                 fi
                 ;;
-            3)
+            u|update|3)
                 update_codex
                 ;;
-            4)
-                echo "  1) Remove one installed skill"
-                echo "  2) Remove the full repo-managed skill pack"
-                echo "  3) Cancel"
-                read -r -p "Choose an option: " remove_mode
+            r|remove|4)
+                print_menu_option "1" "remove one installed skill"
+                print_menu_option "2" "remove full skill pack"
+                print_menu_option "x" "cancel"
+                read -r -p "remove> " remove_mode
                 case "$remove_mode" in
                     1)
                         selected_skill="$(choose_installed_skill_interactively)" || continue
@@ -1351,37 +2319,37 @@ run_interactive_menu() {
                         fi
                         ;;
                     *)
-                        print_info "Remove cancelled."
+                        print_info "Remove cancelled"
                         ;;
                 esac
                 ;;
-            5)
-                echo "  1) Verify the full installed skill pack"
-                echo "  2) Verify one installed skill"
-                echo "  3) Cancel"
-                read -r -p "Choose an option: " verify_mode
+            v|verify|5)
+                print_menu_option "1" "verify full skill pack"
+                print_menu_option "2" "verify one skill"
+                print_menu_option "x" "cancel"
+                read -r -p "verify> " verify_mode
                 case "$verify_mode" in
                     1)
                         verify_pack_checksums
                         ;;
                     2)
                         selected_skill="$(choose_installed_skill_interactively)" || continue
-                        verify_skill_checksum "$selected_skill"
+                        run_task_line "verify $selected_skill" verify_skill_checksum "$selected_skill"
                         ;;
                     *)
-                        print_info "Verification cancelled."
+                        print_info "Verification cancelled"
                         ;;
                 esac
                 ;;
-            6)
+            st|status|6)
                 show_status
                 ;;
-            7)
-                print_success "Goodbye."
+            q|quit|7)
+                print_success "Goodbye"
                 return 0
                 ;;
             *)
-                print_warning "Choose a valid option."
+                print_warning "Choose a valid option"
                 ;;
         esac
     done
@@ -1403,6 +2371,7 @@ show_status() {
     local codex_synced_count=0
     local codex_home_agent_total=0
     local codex_home_agent_inheriting=0
+    local codex_home_agent_overrides=()
     for skill_dir in "$CODEX_SOURCE"/*/; do
         if [[ -f "$skill_dir/SKILL.md" ]]; then
             ((codex_source_count+=1))
@@ -1411,13 +2380,21 @@ show_status() {
                 ((codex_synced_count+=1))
             fi
 
-            local home_agent_file="$CODEX_TARGET/agents/$skill_name.toml"
-            if [[ -f "$home_agent_file" ]]; then
-                ((codex_home_agent_total+=1))
-                if ! grep -qE '^(model|model_reasoning_effort) =' "$home_agent_file"; then
-                    ((codex_home_agent_inheriting+=1))
+            local agent_config_path
+            while IFS= read -r agent_config_path; do
+                [[ -n "$agent_config_path" ]] || continue
+                local home_agent_name
+                home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+                local home_agent_file="$CODEX_TARGET/agents/$home_agent_name.toml"
+                if [[ -f "$home_agent_file" ]]; then
+                    ((codex_home_agent_total+=1))
+                    if ! grep -qE '^(model|model_reasoning_effort) =' "$home_agent_file"; then
+                        ((codex_home_agent_inheriting+=1))
+                    else
+                        codex_home_agent_overrides+=("$home_agent_name")
+                    fi
                 fi
-            fi
+            done < <(list_skill_agent_config_files "$skill_name")
         fi
     done
 
@@ -1444,7 +2421,11 @@ show_status() {
     fi
 
     if [[ $codex_home_agent_total -gt 0 ]]; then
-        echo "  agent inheritance: $codex_home_agent_inheriting/$codex_home_agent_total"
+        if [[ ${#codex_home_agent_overrides[@]} -gt 0 ]]; then
+            echo "  agent inheritance: $codex_home_agent_inheriting/$codex_home_agent_total (explicit overrides: ${codex_home_agent_overrides[*]})"
+        else
+            echo "  agent inheritance: $codex_home_agent_inheriting/$codex_home_agent_total"
+        fi
     else
         echo "  agent inheritance: 0/0"
     fi
@@ -1457,20 +2438,21 @@ show_status() {
 
 # Main script
 show_usage() {
-    echo "Usage: $0 {menu|install|sync|codex|update|remove|verify|validate|status|all}"
+    echo "Usage: $0 {menu|install|i|sync|s|codex|update|u|remove|uninstall|verify|v|validate|status|st|all}"
     echo ""
     echo "Commands:"
     echo "  menu              - Open the interactive installer and management menu"
-    echo "  install           - Validate, sync, version-stamp, and MD5-verify the skill pack"
-    echo "  sync              - Alias for codex; force-sync and MD5-verify the skill pack"
-    echo "  codex             - Sync Codex skills only, then MD5-verify the result"
-    echo "  update            - Detect drift with MD5, sync only when needed, then verify"
+    echo "  install | i       - Validate, sync, and verify the skill pack"
+    echo "  sync | s | codex  - Force-sync the skill pack and verify the result"
+    echo "  update | u        - Check for update and refresh changed repo-managed files"
     echo "  remove            - Remove the full repo-managed skill pack"
+    echo "  uninstall         - Alias for remove"
     echo "  remove <skill>    - Remove one installed skill by name"
-    echo "  verify            - Verify the installed skill pack with MD5 checksums"
+    echo "  uninstall <skill> - Alias for remove <skill>"
+    echo "  verify | v        - Verify the installed skill pack with MD5 checksums"
     echo "  verify <skill>    - Verify one installed skill with MD5 checksums"
     echo "  validate          - Validate all skills without syncing"
-    echo "  status            - Show sync status, versions, and checksum drift"
+    echo "  status | st       - Show sync status, versions, and checksum drift"
     echo "  all               - Validate and sync Codex (default)"
     echo ""
     echo "Environment:"
@@ -1478,36 +2460,31 @@ show_usage() {
 }
 
 main() {
-    echo ""
-    print_info "Codex Skills Sync and Validation"
-    echo ""
+    print_header "Codex Skills"
 
     case "${1:-}" in
         menu)
             run_interactive_menu
             ;;
-        install)
+        install|i)
             install_codex
             ;;
-        sync)
+        sync|s|codex)
             sync_codex
             ;;
-        codex)
-            sync_codex
-            ;;
-        update)
+        update|u)
             update_codex
             ;;
-        remove)
+        remove|uninstall)
             if [[ -n "${2:-}" ]]; then
                 remove_skill_installation "$2"
             else
                 remove_skill_pack
             fi
             ;;
-        verify)
+        verify|v)
             if [[ -n "${2:-}" ]]; then
-                verify_skill_checksum "$2"
+                run_task_line "verify $2" verify_skill_checksum "$2"
             else
                 verify_pack_checksums
             fi
@@ -1515,17 +2492,15 @@ main() {
         validate)
             validate_all
             ;;
-        status)
+        status|st)
             show_status
             ;;
         ""|all)
-            validate_all
-            if [[ $? -eq 0 ]]; then
-                sync_codex
-            else
+            run_task_line "validate" validate_all || {
                 print_error "Validation failed, skipping sync"
                 exit 1
-            fi
+            }
+            run_task_line "sync" sync_codex
             ;;
         *)
             show_usage
@@ -1533,8 +2508,7 @@ main() {
             ;;
     esac
 
-    echo ""
-    print_success "Done!"
+    print_success "Done"
 }
 
 main "$@"

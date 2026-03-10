@@ -167,6 +167,20 @@ Never over-claim confidence in these situations:
 - one clean run is not enough for an intermittent high-severity defect
 - absence of telemetry is not proof that the system behaved correctly
 
+## OpenAI-Aligned Delegation Defaults
+
+- Use **agents as tools** when one manager should keep control of the user-facing turn, combine specialist outputs, or enforce shared guardrails and final formatting.
+- Use **handoffs** when routing should transfer control so the selected specialist owns the rest of the turn directly.
+- Use **code-orchestrated sequencing** for deterministic test pipelines, explicit retries, or bounded parallel branches whose dependencies are already known.
+- Hybrid patterns are acceptable when a triage agent hands off and the active specialist still calls narrower agents as tools.
+
+## Context-Sharing Defaults
+
+- Keep local runtime state, approvals, and environment dependencies separate from model-visible context unless they are intentionally exposed.
+- Prefer filtered history or concise handoff packets over replaying the full transcript by default.
+- Choose one conversation continuation strategy per thread unless there is an explicit reconciliation plan.
+- Preserve workflow names, trace metadata, and validation evidence for multi-agent QA investigations.
+
 ## Windows Execution Guidance
 
 - Route tool-assisted work through `js_repl` with `codex.tool(...)` first.
