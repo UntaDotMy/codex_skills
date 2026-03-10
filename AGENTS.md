@@ -412,6 +412,8 @@ REPEAT UNTIL CLEAN:
 - Prefer modular structure: keep entrypoints thin and move named logic into focused files or modules.
 - Keep route handlers, controllers, pages, CLI entrypoints, and main scripts short; let them orchestrate and delegate instead of owning business logic directly.
 - When a project spans backend, API, frontend, workers, or tests, separate those concerns clearly instead of collapsing them into one large file.
+- Extend an existing entrypoint, installer, updater, or wrapper before adding a new one; do not create a parallel setup path when the current entry file can absorb the behavior cleanly.
+- Keep one obvious install or update path per platform by default; reject extra bootstrap wrappers, duplicate installer scripts, or alternate entry files unless the user explicitly asks for a separate path.
 - Prefer surgical patches over full rewrites when only part of a file is affected.
 - Keep tracing easy: a reviewer should be able to identify where behavior lives without reading one giant file.
 
@@ -501,6 +503,7 @@ Use features when they provide clear value, not by default.
 - **Adding Unrequested Features**: Implementing features that weren't asked for
 - **Unnecessary Refactoring**: Refactoring code not related to the task
 - **Over-Engineering**: Adding abstraction, configuration, or flexibility that wasn't requested
+- **Parallel Entry Paths**: Adding extra wrappers, duplicate bootstrap files, alternate installer scripts, or second entrypoints when the existing file can be extended safely
 - **Backward Compatibility**: Adding compatibility layers when just updating the feature
 - **Keeping Dead Code**: Keeping old code "just in case" instead of deleting it
 - **Defensive Programming**: Adding error handling for scenarios that can't happen

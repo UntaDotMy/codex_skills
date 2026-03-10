@@ -4,6 +4,51 @@ This repository is a Codex-first skill pack for OpenAI Codex CLI. It ships speci
 
 ## Quick Start
 
+### One-File Install
+
+You do not need to manually clone the whole repo first anymore.
+
+Download just the existing entry script for your platform and run it. If the full repo is not present yet, the script now bootstraps a managed clone into `~/.codex-skill-pack-repos/codex_skills`, then continues with the normal repo-managed install, menu, update, and status flows from there.
+
+#### macOS and Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/UntaDotMy/codex_skills/main/sync-skills.sh -o sync-skills.sh
+bash ./sync-skills.sh install
+bash ./sync-skills.sh status
+```
+
+Keep using the same file after that:
+
+```bash
+bash ./sync-skills.sh menu
+bash ./sync-skills.sh github-update
+```
+
+#### Windows PowerShell
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/UntaDotMy/codex_skills/main/sync-skills.ps1 -OutFile .\sync-skills.ps1
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
+```
+
+Keep using the same file after that:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 github-update
+```
+
+Bootstrap environment overrides:
+
+- `CODEX_SKILLS_REPOSITORY_PATH` — change where the managed clone lives
+- `CODEX_SKILLS_REPOSITORY_URL` — point the bootstrap flow at your fork or a local test repo
+- `CODEX_SKILLS_REPOSITORY_BRANCH` — clone a non-`main` branch
+- `CODEX_TARGET_OVERRIDE` — install into a different Codex home target
+
+If the default managed clone path is left half-created by an interrupted first run, the one-file bootstrap flow now repairs that default path automatically on the next attempt.
+
 ### AI-Assisted Install
 
 If you want Codex to install this for you, copy and paste this prompt into a Codex session:
@@ -17,12 +62,13 @@ Working brief:
 - Constraints: use the repo-managed install entrypoints only, keep changes surgical, and respect the current platform path detection or `CODEX_TARGET_OVERRIDE` if I provide it.
 
 Required flow:
-1. Clone the repo with `git clone https://github.com/UntaDotMy/codex_skills.git` if it is not already present.
-2. Change into the repository root.
-3. Read `README.md` and `AGENTS.md` first.
-4. On Windows, prefer the PowerShell wrapper. Run `./sync-skills.ps1 validate`, `./sync-skills.ps1 install`, and `./sync-skills.ps1 status`. If PowerShell script execution is blocked, rerun the same commands with `powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 <command>`.
-5. On macOS/Linux, run `./sync-skills.sh validate`, `./sync-skills.sh install`, and `./sync-skills.sh status`.
-6. Tell me whether repo version, installed version, memory-status-reporter wiring, agent inheritance, and MD5 verification all pass.
+1. Read `README.md` and `AGENTS.md` first.
+2. If the full repo is not already present locally, bootstrap it from the existing entry script only:
+   - macOS/Linux: download `sync-skills.sh`, then run `bash ./sync-skills.sh install`
+   - Windows: download `sync-skills.ps1`, then run `powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install`
+3. If the repo is already present, use the normal repo-managed `sync-skills.sh` or `sync-skills.ps1` entrypoint there.
+4. After install, run `status`.
+5. Tell me whether repo version, installed version, memory-status-reporter wiring, agent inheritance, and MD5 verification all pass.
 
 If anything fails:
 - identify the exact failing step,
@@ -32,6 +78,10 @@ If anything fails:
 ```
 
 ### Manual Install
+
+If you want the simplest path, use the one-file install above.
+
+If you prefer to keep the full repository in a directory you chose yourself, the manual clone flow still works:
 
 #### macOS and Linux
 
@@ -66,19 +116,19 @@ powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 After installation, you can immediately use the manager and verification flow:
 
 ```bash
-./sync-skills.sh menu
-./sync-skills.sh github-update
-./sync-skills.sh verify
-./sync-skills.sh status
+bash ./sync-skills.sh menu
+bash ./sync-skills.sh github-update
+bash ./sync-skills.sh verify
+bash ./sync-skills.sh status
 ```
 
 On Windows PowerShell, use the wrapper:
 
 ```powershell
-./sync-skills.ps1 menu
-./sync-skills.ps1 github-update
-./sync-skills.ps1 verify
-./sync-skills.ps1 status
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 github-update
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 verify
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 ```
 
 ### Requirements
@@ -94,14 +144,16 @@ On Windows PowerShell, use the wrapper:
 Use the same script in interactive mode when you want install, sync, update, GitHub refresh, remove, verify, and status in one menu:
 
 ```bash
-./sync-skills.sh menu
+bash ./sync-skills.sh menu
 ```
 
 On Windows PowerShell:
 
 ```powershell
-./sync-skills.ps1 menu
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
 ```
+
+If you launched from a one-file bootstrap copy, the script keeps using the managed clone at `~/.codex-skill-pack-repos/codex_skills` by default, so `menu` and `github-update` keep working without a fresh manual clone step.
 
 The interactive manager now handles all of the following in one place:
 
@@ -233,9 +285,9 @@ The sync script detects Windows shells and maps Codex home to `%USERPROFILE%\\.c
 For interactive Windows use outside Codex runtime, prefer the PowerShell wrapper:
 
 ```powershell
-./sync-skills.ps1 install
-./sync-skills.ps1 update
-./sync-skills.ps1 uninstall
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 github-update
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 uninstall
 ```
 
 Inside Codex runtime, route shell work through `js_repl` and `codex.tool("exec_command", ...)`:

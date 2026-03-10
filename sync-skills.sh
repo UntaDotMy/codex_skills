@@ -20,7 +20,119 @@ NC='\033[0m' # No Color
 
 # Directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BOOTSTRAP_DEFAULT_REPOSITORY_URL="https://github.com/UntaDotMy/codex_skills.git"
+BOOTSTRAP_DEFAULT_REPOSITORY_BRANCH="main"
 CODEX_SOURCE="$SCRIPT_DIR"
+
+resolve_default_bootstrap_repository_path() {
+    printf "%s/.codex-skill-pack-repos/codex_skills\n" "$HOME"
+}
+
+bootstrap_repository_layout_is_complete() {
+    local repository_path=$1
+
+    [[ -f "$repository_path/AGENTS.md" ]] && \
+    [[ -f "$repository_path/README.md" ]] && \
+    [[ -f "$repository_path/00-skill-routing-and-escalation.md" ]] && \
+    [[ -f "$repository_path/sync-skills.sh" ]] && \
+    [[ -f "$repository_path/reviewer/SKILL.md" ]]
+}
+
+resolve_bootstrap_repository_path() {
+    if [[ -n "${CODEX_SKILLS_REPOSITORY_PATH:-}" ]]; then
+        printf "%s\n" "$CODEX_SKILLS_REPOSITORY_PATH"
+        return 0
+    fi
+
+    resolve_default_bootstrap_repository_path
+}
+
+bootstrap_managed_repository_path_is_repairable() {
+    local repository_path=$1
+
+    [[ "$repository_path" == "$(resolve_default_bootstrap_repository_path)" ]]
+}
+
+bootstrap_print_info() {
+    printf "[INFO] %s\n" "$1"
+}
+
+bootstrap_print_error() {
+    printf "[ERROR] %s\n" "$1" >&2
+}
+
+bootstrap_ensure_git_available() {
+    if ! command -v git >/dev/null 2>&1; then
+        bootstrap_print_error "Git is required when sync-skills.sh is used as a standalone bootstrap entrypoint."
+        exit 1
+    fi
+}
+
+bootstrap_ensure_managed_repository_clone() {
+    local repository_path=$1
+    local repository_url=$2
+    local repository_branch=$3
+    local repository_parent_path
+    local temporary_repository_path
+
+    if bootstrap_repository_layout_is_complete "$repository_path" && [[ -d "$repository_path/.git" ]]; then
+        return 0
+    fi
+
+    if [[ "$repository_path" == "$SCRIPT_DIR" ]]; then
+        bootstrap_print_error "Standalone bootstrap cannot reuse the current script directory as the managed clone path: $repository_path"
+        exit 1
+    fi
+
+    repository_parent_path="$(dirname "$repository_path")"
+    mkdir -p "$repository_parent_path"
+
+    if [[ -e "$repository_path" ]] && [[ -n "$(find "$repository_path" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]; then
+        if bootstrap_managed_repository_path_is_repairable "$repository_path"; then
+            bootstrap_print_info "Repairing invalid managed clone path: $repository_path"
+            rm -rf "$repository_path"
+        else
+            bootstrap_print_error "Managed clone path exists but is not a valid codex_skills Git clone: $repository_path"
+            bootstrap_print_error "Remove that path or choose a clean CODEX_SKILLS_REPOSITORY_PATH before retrying."
+            exit 1
+        fi
+    fi
+
+    temporary_repository_path="$(mktemp -d "$repository_parent_path/codex_skills.clone.XXXXXX")"
+    trap 'rm -rf "$temporary_repository_path"' RETURN
+    bootstrap_print_info "Cloning managed codex_skills repo into $repository_path"
+    git clone --branch "$repository_branch" --single-branch "$repository_url" "$temporary_repository_path"
+    rm -rf "$repository_path"
+    mv "$temporary_repository_path" "$repository_path"
+    trap - RETURN
+}
+
+bootstrap_delegate_if_needed() {
+    local repository_url
+    local repository_branch
+    local managed_repository_path
+
+    if bootstrap_repository_layout_is_complete "$SCRIPT_DIR"; then
+        return 0
+    fi
+
+    repository_url="${CODEX_SKILLS_REPOSITORY_URL:-$BOOTSTRAP_DEFAULT_REPOSITORY_URL}"
+    repository_branch="${CODEX_SKILLS_REPOSITORY_BRANCH:-$BOOTSTRAP_DEFAULT_REPOSITORY_BRANCH}"
+    managed_repository_path="$(resolve_bootstrap_repository_path)"
+
+    bootstrap_ensure_git_available
+    bootstrap_ensure_managed_repository_clone "$managed_repository_path" "$repository_url" "$repository_branch"
+
+    if [[ ! -f "$managed_repository_path/sync-skills.sh" ]]; then
+        bootstrap_print_error "Managed clone is missing sync-skills.sh: $managed_repository_path"
+        exit 1
+    fi
+
+    bootstrap_print_info "Using managed clone: $managed_repository_path"
+    exec bash "$managed_repository_path/sync-skills.sh" "$@"
+}
+
+bootstrap_delegate_if_needed "$@"
 
 detect_platform_name() {
     local uname_value
@@ -1352,6 +1464,10 @@ validate_codex_skill_dir() {
                 print_error "Reviewer skill is missing enforced structure or layered-testing guidance"
                 return 1
             fi
+            if ! grep -q "REJECT duplicate entry paths" "$skill_dir/SKILL.md" || ! grep -q "REQUIRE one obvious path" "$skill_dir/SKILL.md"; then
+                print_error "Reviewer skill is missing anti-junk entrypoint guidance"
+                return 1
+            fi
             if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Multi-Agent Execution Pattern \(Completion-First\)" "main agent must verify" "send updated work back" "multiple parallel reviewer passes" "distinct purpose or workstream label"; then
                 print_error "Reviewer skill is missing multi-reviewer lane or re-review guidance"
                 return 1
@@ -1640,6 +1756,11 @@ validate_codex_guidance_file() {
 
         if ! grep -qi "working brief" "$file" || ! grep -qi "Tool Mistakes Count" "$file" || ! grep -qi "Prefer test-first when practical" "$file" || ! grep -qi "Context Retrieval Ladder" "$file" || ! grep -qi "Learning Snapshot" "$file" || ! grep -qi "Prefer modular structure" "$file" || ! grep -qi "Keep route handlers, controllers, pages, CLI entrypoints, and main scripts short" "$file"; then
             print_error "Missing prompt-alignment, context-efficiency, modularity, thin-entrypoint, tool-mistake, or learning-snapshot policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "Extend an existing entrypoint, installer, updater, or wrapper before adding a new one" "$file" || ! grep -qi "Keep one obvious install or update path per platform" "$file"; then
+            print_error "Missing anti-junk entrypoint and duplicate-wrapper policy in AGENTS.md"
             return 1
         fi
 
@@ -2752,6 +2873,9 @@ show_usage() {
     echo ""
     echo "Environment:"
     echo "  CODEX_TARGET_OVERRIDE=/custom/path/.codex  Override the Codex home target"
+    echo "  CODEX_SKILLS_REPOSITORY_PATH=/path/to/codex_skills  Override the managed clone path for standalone bootstrap use"
+    echo "  CODEX_SKILLS_REPOSITORY_URL=https://github.com/owner/repo.git  Override the bootstrap clone source"
+    echo "  CODEX_SKILLS_REPOSITORY_BRANCH=main  Override the bootstrap clone branch"
 }
 
 main() {
