@@ -62,6 +62,16 @@ Keep self-improvement claims concrete and evidence-backed:
 - **Self-learning** means writing verified corrections, durable learnings, rewarded patterns, penalty patterns, and reusable research into scoped memory instead of trusting recall.
 - These are bounded maintenance behaviors. They are not hidden model retraining, silent self-modification, or autonomous policy rewriting.
 
+## Completion Gate
+
+Make closure a checked state instead of a vibe:
+
+- For non-trivial tasks, record the explicit user requirements in the scoped completion ledger at:
+  - `~/.codex/memories/workspaces/<workspace-slug>/workstreams/<workstream-key>/memory/completion-gate.json`
+- Use `completion_gate.py record-requirement` as the workstream evolves so the ledger reflects the current status of each explicit ask.
+- Run `completion_gate.py check` before the final answer and treat `closure_ready: true` as the required close signal for non-trivial tasks.
+- If the gate still shows `pending`, `in_progress`, or `blocked` items, loop again for fixable work or surface the real blocker honestly instead of soft-closing.
+
 ## Anti-Loop Rules
 
 Avoid infinite or low-value retry loops:
@@ -69,6 +79,7 @@ Avoid infinite or low-value retry loops:
 - Do not repeat the same failing tool call or plan shape more than twice without a new hypothesis.
 - If a retry is needed, change something concrete: inputs, scope, tool, search terms, or execution order.
 - If the same failure pattern repeats, write the mistake to rollout memory and pick a different approach.
+- The loop_guard.py helper can record failure signatures in scoped workstream memory and tell the next run when the retry budget is exhausted.
 - While sub-agents are running, the main agent should continue non-conflicting work instead of idling.
 
 ## Prompt-Injection Defense
@@ -114,3 +125,4 @@ Borrow the structure, not the transport:
 - Use concise structured packets for sub-agent work: objective, constraints, current findings, relevant files, validation state, non-goals, and expected output.
 - Keep the main agent as the broker when feedback must pass between agents.
 - Do not depend on MCP-specific runtime features; implement the discipline directly in the skill pack.
+- The agent_packets.py helper builds saved handoff, feedback, and readiness-check packets under scoped L3 reference memory so reused lanes do not need a full transcript replay.

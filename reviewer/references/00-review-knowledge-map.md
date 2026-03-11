@@ -55,7 +55,7 @@ Use this map to load only the references needed for the requested review target.
 | Summary-first handoff quality checks (compact packet, no raw full-prompt/history replay) | 50-feedback-style-and-remediation.md + 10-requirements-traceability-and-prd-review.md |
 | Role-output discipline checks (non-reviewer concise packet output, reviewer full narrative output) | 50-feedback-style-and-remediation.md + 40-testing-release-production-readiness-review.md |
 | Skill quality/completeness checks (for SKILL.md artifacts) | 10-requirements-traceability-and-prd-review.md + 50-feedback-style-and-remediation.md |
-| Reviewer-first routing quality checks (default triage and specialist escalation discipline) | 50-feedback-style-and-remediation.md + 10-requirements-traceability-and-prd-review.md |
+| Domain-first routing quality checks (clear specialist ownership, reviewer only for audits or final validation) | 50-feedback-style-and-remediation.md + 10-requirements-traceability-and-prd-review.md |
 | Standards/source verification | 99-source-anchors.md |
 
 ## Quick Review Sequence
@@ -98,7 +98,7 @@ Use this map to load only the references needed for the requested review target.
 36. Validate pre-execution brainstorm/voting loop quality when applicable (proposals, rubric scoring, tie handling, no-surprise scope check).
 37. Validate runtime feature-state gate handling (`codex features list`, `config.toml`, and capability-dependent fallback decisions).
 38. Validate js_repl timeout/reset stability handling when js_repl is used (Node compatibility, timeout_ms pragmas, chunking, and recovery evidence).
-39. Validate reviewer-first routing quality (default triage + specialist escalation only when needed).
+39. Validate domain-first routing quality (clear specialist ownership + reviewer only when needed for audits or final validation).
 40. Validate flow-quality dimension alignment when process quality is in scope.
 41. Validate skill expertise depth and vague-prompt handling quality (for skill reviews).
 42. Return actionable feedback and readiness verdict.

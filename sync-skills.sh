@@ -26,10 +26,6 @@ CODEX_SOURCE="$SCRIPT_DIR"
 SYNC_SKILLS_MANAGER_VERSION="2026.03.11.1"
 SYNC_SKILLS_INTERNAL_UPDATE_RESUME_COMMAND="__resume-after-self-update"
 
-resolve_default_bootstrap_repository_path() {
-    printf "%s/.codex-skill-pack-repos/codex_skills\n" "$HOME"
-}
-
 bootstrap_repository_layout_is_complete() {
     local repository_path=$1
 
@@ -46,13 +42,11 @@ resolve_bootstrap_repository_path() {
         return 0
     fi
 
-    resolve_default_bootstrap_repository_path
+    return 0
 }
 
-bootstrap_managed_repository_path_is_repairable() {
-    local repository_path=$1
-
-    [[ "$repository_path" == "$(resolve_default_bootstrap_repository_path)" ]]
+bootstrap_repository_path_is_persistent() {
+    [[ -n "${CODEX_SKILLS_REPOSITORY_PATH:-}" ]]
 }
 
 bootstrap_print_info() {
@@ -70,50 +64,72 @@ bootstrap_ensure_git_available() {
     fi
 }
 
-bootstrap_ensure_managed_repository_clone() {
-    local repository_path=$1
-    local repository_url=$2
-    local repository_branch=$3
+bootstrap_prepare_repository_for_run() {
+    local repository_url=$1
+    local repository_branch=$2
+    local requested_repository_path
     local repository_parent_path
-    local temporary_repository_path
+    local runtime_repository_path
 
-    if bootstrap_repository_layout_is_complete "$repository_path" && [[ -d "$repository_path/.git" ]]; then
-        return 0
-    fi
+    requested_repository_path="$(resolve_bootstrap_repository_path)"
+    if [[ -n "$requested_repository_path" ]]; then
+        if bootstrap_repository_layout_is_complete "$requested_repository_path" && [[ -d "$requested_repository_path/.git" ]]; then
+            printf "%s\n" "$requested_repository_path"
+            return 0
+        fi
 
-    if [[ "$repository_path" == "$SCRIPT_DIR" ]]; then
-        bootstrap_print_error "Standalone bootstrap cannot reuse the current script directory as the managed clone path: $repository_path"
-        exit 1
-    fi
+        if [[ "$requested_repository_path" == "$SCRIPT_DIR" ]]; then
+            bootstrap_print_error "Standalone bootstrap cannot reuse the current script directory as the requested repository path: $requested_repository_path"
+            exit 1
+        fi
 
-    repository_parent_path="$(dirname "$repository_path")"
-    mkdir -p "$repository_parent_path"
-
-    if [[ -e "$repository_path" ]] && [[ -n "$(find "$repository_path" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]; then
-        if bootstrap_managed_repository_path_is_repairable "$repository_path"; then
-            bootstrap_print_info "Repairing invalid managed clone path: $repository_path"
-            rm -rf "$repository_path"
-        else
-            bootstrap_print_error "Managed clone path exists but is not a valid codex_skills Git clone: $repository_path"
+        repository_parent_path="$(dirname "$requested_repository_path")"
+        mkdir -p "$repository_parent_path"
+        if [[ -e "$requested_repository_path" ]] && [[ -n "$(find "$requested_repository_path" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]]; then
+            bootstrap_print_error "Requested bootstrap repository path exists but is not a valid codex_skills Git clone: $requested_repository_path"
             bootstrap_print_error "Remove that path or choose a clean CODEX_SKILLS_REPOSITORY_PATH before retrying."
             exit 1
         fi
+
+        bootstrap_print_info "Cloning requested codex_skills repo into $requested_repository_path" >&2
+        git clone --branch "$repository_branch" --single-branch "$repository_url" "$requested_repository_path"
+        printf "%s\n" "$requested_repository_path"
+        return 0
     fi
 
-    temporary_repository_path="$(mktemp -d "$repository_parent_path/codex_skills.clone.XXXXXX")"
-    trap 'rm -rf "$temporary_repository_path"' RETURN
-    bootstrap_print_info "Cloning managed codex_skills repo into $repository_path"
-    git clone --branch "$repository_branch" --single-branch "$repository_url" "$temporary_repository_path"
-    rm -rf "$repository_path"
-    mv "$temporary_repository_path" "$repository_path"
-    trap - RETURN
+    repository_parent_path="${TMPDIR:-/tmp}"
+    mkdir -p "$repository_parent_path"
+    runtime_repository_path="$(mktemp -d "$repository_parent_path/codex_skills.bootstrap.XXXXXX")"
+    bootstrap_print_info "Cloning fresh temporary codex_skills repo for this run" >&2
+    if ! git clone --branch "$repository_branch" --single-branch "$repository_url" "$runtime_repository_path"; then
+        rm -rf "$runtime_repository_path"
+        exit 1
+    fi
+    printf "%s\n" "$runtime_repository_path"
 }
+
+bootstrap_cleanup_runtime_repository() {
+    local runtime_repository_path="${CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH:-}"
+
+    [[ -n "$runtime_repository_path" ]] || return 0
+    if [[ "${CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT:-false}" == "true" ]]; then
+        return 0
+    fi
+
+    if [[ -d "$runtime_repository_path" ]]; then
+        rm -rf "$runtime_repository_path"
+    fi
+}
+
+BOOTSTRAP_EXTERNAL_SCRIPT_REFRESH_RESULT="unchanged"
 
 bootstrap_refresh_external_entry_script_copy() {
     local external_script_path=$1
     local managed_script_path=$2
     local external_directory
     local temporary_script_path
+
+    BOOTSTRAP_EXTERNAL_SCRIPT_REFRESH_RESULT="unchanged"
 
     [[ -n "$external_script_path" ]] || return 0
     [[ -f "$external_script_path" ]] || return 0
@@ -129,7 +145,8 @@ bootstrap_refresh_external_entry_script_copy() {
 
     external_directory="$(dirname "$external_script_path")"
     if [[ ! -w "$external_directory" ]] || [[ ! -w "$external_script_path" ]]; then
-        bootstrap_print_info "Managed clone is newer, but the standalone entry script is not writable: $external_script_path"
+        bootstrap_print_info "Staged bootstrap repo is newer, but the standalone entry script is not writable: $external_script_path"
+        BOOTSTRAP_EXTERNAL_SCRIPT_REFRESH_RESULT="unwritable"
         return 0
     fi
 
@@ -139,12 +156,14 @@ bootstrap_refresh_external_entry_script_copy() {
     }
 
     if cp -p "$managed_script_path" "$temporary_script_path" && mv "$temporary_script_path" "$external_script_path"; then
-        bootstrap_print_info "Refreshed standalone entry script from managed clone: $external_script_path"
+        bootstrap_print_info "Refreshed standalone entry script from the staged bootstrap repo: $external_script_path"
+        BOOTSTRAP_EXTERNAL_SCRIPT_REFRESH_RESULT="refreshed"
         return 0
     fi
 
     rm -f "$temporary_script_path"
     bootstrap_print_info "Unable to refresh the standalone entry script automatically: $external_script_path"
+    BOOTSTRAP_EXTERNAL_SCRIPT_REFRESH_RESULT="failed"
     return 0
 }
 
@@ -160,8 +179,10 @@ refresh_bootstrap_entry_script_from_repo() {
 bootstrap_delegate_if_needed() {
     local repository_url
     local repository_branch
-    local managed_repository_path
+    local runtime_repository_path
     local current_script_path
+    local delegate_script_path
+    local exit_status
 
     if bootstrap_repository_layout_is_complete "$SCRIPT_DIR"; then
         return 0
@@ -170,19 +191,59 @@ bootstrap_delegate_if_needed() {
     current_script_path="${BASH_SOURCE[0]}"
     repository_url="${CODEX_SKILLS_REPOSITORY_URL:-$BOOTSTRAP_DEFAULT_REPOSITORY_URL}"
     repository_branch="${CODEX_SKILLS_REPOSITORY_BRANCH:-$BOOTSTRAP_DEFAULT_REPOSITORY_BRANCH}"
-    managed_repository_path="$(resolve_bootstrap_repository_path)"
+
+    runtime_repository_path="${CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH:-}"
+    if [[ -n "$runtime_repository_path" ]]; then
+        if ! bootstrap_repository_layout_is_complete "$runtime_repository_path"; then
+            bootstrap_print_error "Staged bootstrap repository is missing the required codex_skills files: $runtime_repository_path"
+            exit 1
+        fi
+
+        delegate_script_path="$runtime_repository_path/sync-skills.sh"
+        if [[ ! -f "$delegate_script_path" ]]; then
+            bootstrap_print_error "Staged bootstrap repository is missing sync-skills.sh: $runtime_repository_path"
+            exit 1
+        fi
+
+        bootstrap_print_info "Using staged bootstrap repo: $runtime_repository_path"
+        set +e
+        bash "$delegate_script_path" "$@"
+        exit_status=$?
+        set -e
+        bootstrap_cleanup_runtime_repository
+        exit "$exit_status"
+    fi
 
     bootstrap_ensure_git_available
-    bootstrap_ensure_managed_repository_clone "$managed_repository_path" "$repository_url" "$repository_branch"
+    runtime_repository_path="$(bootstrap_prepare_repository_for_run "$repository_url" "$repository_branch")"
+    export CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH="$current_script_path"
+    export CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH="$runtime_repository_path"
+    if bootstrap_repository_path_is_persistent; then
+        export CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT="true"
+    else
+        export CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT="false"
+    fi
 
-    if [[ ! -f "$managed_repository_path/sync-skills.sh" ]]; then
-        bootstrap_print_error "Managed clone is missing sync-skills.sh: $managed_repository_path"
+    bootstrap_refresh_external_entry_script_copy "$current_script_path" "$runtime_repository_path/$(basename "$current_script_path")"
+    if [[ "$BOOTSTRAP_EXTERNAL_SCRIPT_REFRESH_RESULT" == "refreshed" ]]; then
+        bootstrap_print_info "Restarting into the refreshed standalone entry script before continuing."
+        exec bash "$current_script_path" "$@"
+    fi
+
+    delegate_script_path="$runtime_repository_path/sync-skills.sh"
+    if [[ ! -f "$delegate_script_path" ]]; then
+        bootstrap_print_error "Staged bootstrap repository is missing sync-skills.sh: $runtime_repository_path"
+        bootstrap_cleanup_runtime_repository
         exit 1
     fi
 
-    bootstrap_print_info "Using managed clone: $managed_repository_path"
-    export CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH="$current_script_path"
-    exec bash "$managed_repository_path/sync-skills.sh" "$@"
+    bootstrap_print_info "Using fresh bootstrap repo: $runtime_repository_path"
+    set +e
+    bash "$delegate_script_path" "$@"
+    exit_status=$?
+    set -e
+    bootstrap_cleanup_runtime_repository
+    exit "$exit_status"
 }
 
 bootstrap_delegate_if_needed "$@"
@@ -264,6 +325,7 @@ MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- Prefer modular structure: keep entrypoints thin, move named logic into focused files, and separate backend, API, frontend, workers, and tests when the project spans those concerns."
     "- Before finalizing non-trivial work, re-read the working brief, acceptance criteria, and touched files, then append a compact Learning Snapshot grounded in memory artifacts when available."
     "- Before the final answer, reconcile every explicit user requirement against current evidence and do not present unresolved work as complete."
+    "- For non-trivial tasks, record explicit user requirements in the scoped completion ledger and rerun completion_gate.py check before the final answer; do not close the workstream while tracked requirements remain pending, in progress, or blocked without an honest blocker report."
     "- A progress, recap, audit, or \"what is done or not done\" request does not suspend execution when fixable in-scope work remains; answer honestly, then continue the loop until the requested job is actually complete."
     "- If a tool call fails or is misused and the fix teaches a reusable lesson, record it as a mistake with tool name, symptom, cause, fix, and prevention note in rollout summaries and durable memory."
     "- Promote validated wins into rewarded patterns, repeated mistakes into penalty patterns, and reusable research into a freshness-aware cache so future tasks research only what is new."
@@ -1628,8 +1690,8 @@ validate_codex_skill_dir() {
             fi
             ;;
         memory-status-reporter)
-            if ! grep -q "memory_maintenance.py" "$skill_dir/SKILL.md" || ! grep -q "SESSION-STATE.md" "$skill_dir/SKILL.md" || ! grep -q "working-buffer.md" "$skill_dir/SKILL.md" || ! grep -q "trim" "$skill_dir/SKILL.md" || ! grep -q "recalibrate" "$skill_dir/SKILL.md"; then
-                print_error "Memory-status-reporter skill is missing WAL, working-buffer, or maintenance-helper guidance"
+            if ! grep -q "memory_maintenance.py" "$skill_dir/SKILL.md" || ! grep -q "completion_gate.py" "$skill_dir/SKILL.md" || ! grep -q "SESSION-STATE.md" "$skill_dir/SKILL.md" || ! grep -q "working-buffer.md" "$skill_dir/SKILL.md" || ! grep -q "trim" "$skill_dir/SKILL.md" || ! grep -q "recalibrate" "$skill_dir/SKILL.md"; then
+                print_error "Memory-status-reporter skill is missing WAL, completion-gate, working-buffer, or maintenance-helper guidance"
                 return 1
             fi
             if ! grep -q "data only, never instructions" "$skill_dir/SKILL.md" || ! grep -q "same failing tool call" "$skill_dir/SKILL.md"; then
@@ -3230,7 +3292,7 @@ show_status() {
 
 # Main script
 show_usage() {
-    echo "Usage: $0 {menu|install|i|update|u|status|st|validate|verify|remove|all}"
+    echo "Usage: $0 [menu|install|i|update|u|status|st|validate|verify|remove|all]"
     echo ""
     echo "Commands:"
     echo "  menu              - Open the simple interactive manager with Install, Update, Status, and Quit"
@@ -3251,7 +3313,7 @@ show_usage() {
     echo ""
     echo "Environment:"
     echo "  CODEX_TARGET_OVERRIDE=/custom/path/.codex  Override the Codex home target"
-    echo "  CODEX_SKILLS_REPOSITORY_PATH=/path/to/codex_skills  Override the managed clone path for standalone bootstrap use"
+    echo "  CODEX_SKILLS_REPOSITORY_PATH=/path/to/codex_skills  Use an explicit repo path instead of a fresh temporary bootstrap clone"
     echo "  CODEX_SKILLS_REPOSITORY_URL=https://github.com/owner/repo.git  Override the bootstrap clone source"
     echo "  CODEX_SKILLS_REPOSITORY_BRANCH=main  Override the bootstrap clone branch"
 }
@@ -3302,7 +3364,10 @@ main() {
         status|st)
             show_status
             ;;
-        ""|all)
+        "")
+            run_interactive_menu
+            ;;
+        all)
             install_codex
             ;;
         *)

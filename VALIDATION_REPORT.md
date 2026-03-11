@@ -68,7 +68,9 @@ The repository is now aligned as a Codex-only skill pack. The sync workflow is f
 - Skills and prompts now enforce a cache-first research gate so repeated solved questions can reuse fresh findings before browsing again
 - Skills and prompts now enforce workspace-scoped memory lookup before broad global memory so reused agents do not reload every prior context blob
 - The skill pack now ships scoped memory and research-cache helpers for lookup, record, stale, and reward flows under `~/.codex/memories/`
+- The skill pack now ships agent_packets.py for structured handoff, readiness, and feedback packets, loop_guard.py for scoped anti-loop evidence, and completion_gate.py for evidence-backed closure instead of prose-only retry or finish-state guidance
 - Skills and prompts now enforce a keep-iterating completion rule so the next in-scope validation failure gets fixed in the same turn
+- Non-trivial tasks can now persist explicit requirement ledgers, require blocker reasons for blocked items, and keep final closure blocked until completion_gate.py reports that every tracked requirement is done
 - Sub-agent guidance now forbids `interrupt=true` rush behavior for required agents and keeps same-role reviewer or verification agents reusable across the same workstream
 - Sync wiring now injects context-efficiency, surgical-patch, modular-structure, and learning-snapshot policy into `~/.codex/config.toml`
 - AGENTS guidance now requires a compact learning snapshot for non-trivial work when memory artifacts are available

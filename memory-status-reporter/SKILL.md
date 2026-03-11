@@ -22,6 +22,7 @@ Turn Codex memory artifacts into a human-readable status report that feels like 
 
 - When validation, testing, or review reveals another in-scope bug or quality gap, keep iterating in the same turn and fix the next issue before handing off.
 - A progress, recap, audit, or "what is done or not done" request is an honest checkpoint, not a closing condition; if fixable in-scope work remains, keep going after the status summary until the requested job is actually complete.
+- For non-trivial tasks, track explicit user requirements in the scoped completion ledger with `completion_gate.py` and treat the final `check` result as the closure gate instead of relying on narrative judgment alone.
 - Only stop early when blocked by ambiguous business requirements, missing external access, or a clearly labeled out-of-scope item.
 
 ## WAL and Working Buffer Protocol
@@ -117,16 +118,28 @@ Always produce these sections unless the user narrows the scope:
      cmd: `${pythonLauncher} ~/.codex/skills/memory-status-reporter/scripts/memory_maintenance.py append-working-buffer --memory-base ~/.codex/memories --workspace-root "$PWD" --workstream-key active-workstream --agent-instance reviewer-main --text "Validated the sync validator after the rollout-memory patch."`
    })
    ```
-14. Use `trim` to archive overflow from L1 memory files instead of letting always-read files grow without bound.
-15. Use `recalibrate` to re-read the scoped L1 files and compare observed behavior notes against the current canonical rules when long sessions or repeated mistakes suggest drift.
-16. Use the spawned-agent registry helper to persist same-role reuse decisions across turns instead of relying on recall alone. The helper lives at `~/.codex/skills/memory-status-reporter/scripts/agent_registry.py` and supports `register`, `lookup`, `list`, `set-status`, and `mark-unhealthy`.
-17. Only use spawned sub-agents when the report itself requires independent verification or parallel evidence gathering. Follow OpenAI-aligned orchestration defaults: use **agents as tools** when a manager should retain control of the turn, use **handoffs** when routing should transfer ownership of the rest of the turn, and use code-orchestrated sequencing for deterministic reporting pipelines or bounded parallel branches.
-18. Keep local runtime state and memory storage separate from model-visible context unless they are intentionally exposed. Prefer filtered history or concise handoff packets over replaying the full transcript, choose one conversation continuation strategy per thread unless there is an explicit reconciliation plan, and preserve workflow names, trace metadata, plus validation evidence when a report spans multiple agents.
-19. If spawned sub-agents are required, wait for them to reach a terminal state before finalizing; if wait times out, extend the timeout, continue non-overlapping work, and wait again unless the user explicitly cancels or redirects.
-20. Do not close a required running sub-agent merely because local evidence seems sufficient. Within the same project or workstream, keep at most one live same-role agent, maintain a lightweight spawned-agent list keyed by role or workstream, and check that list before every `spawn_agent` call. Never spawn a second same-role sub-agent if one already exists; always reuse it with `send_input` or `resume_agent`, avoid `interrupt=true` unless the user explicitly cancels or redirects, and resume a closed same-role agent before considering any new spawn. Keep `fork_context` off unless the exact parent thread history is required.
-21. When the main agent has parallel sub-agents running, keep doing non-conflicting local work instead of idling. Separate write scopes before dispatch so parallel work stays efficient.
-22. When delegating, send a robust handoff covering the exact objective, constraints, relevant file paths, current findings, validation state, non-goals, and expected output.
-23. Before the final answer, reconcile every explicit user requirement against current evidence and do not present unresolved work as complete.
+14. For non-trivial tasks, record the scoped requirement ledger before the work gets noisy:
+   ```javascript
+   const pythonLauncher = "python"; // Replace with python3 or py -3 when that is the working launcher in this runtime.
+   await codex.tool("exec_command", {
+     cmd: `${pythonLauncher} ~/.codex/skills/memory-status-reporter/scripts/completion_gate.py record-requirement --memory-base ~/.codex/memories --workspace-root "$PWD" --workstream-key active-workstream --agent-instance reviewer-main --requirement-id req-1 --text "Ship the scoped completion gate wiring." --status in_progress --evidence "Planning patch is in progress."`
+   })
+   await codex.tool("exec_command", {
+     cmd: `${pythonLauncher} ~/.codex/skills/memory-status-reporter/scripts/completion_gate.py check --memory-base ~/.codex/memories --workspace-root "$PWD" --workstream-key active-workstream --agent-instance reviewer-main`
+   })
+   ```
+15. Use `trim` to archive overflow from L1 memory files instead of letting always-read files grow without bound.
+16. Use `recalibrate` to re-read the scoped L1 files and compare observed behavior notes against the current canonical rules when long sessions or repeated mistakes suggest drift.
+17. Use the spawned-agent registry helper to persist same-role reuse decisions across turns instead of relying on recall alone. The helper lives at `~/.codex/skills/memory-status-reporter/scripts/agent_registry.py` and supports `register`, `lookup`, `list`, `set-status`, and `mark-unhealthy`.
+18. Use agent_packets.py when you need a reusable handoff, feedback, or readiness-check packet instead of rebuilding that structure from scratch. Save those packets under scoped L3 reference memory so resumed lanes can reuse them without replaying the whole transcript.
+19. Use loop_guard.py when the same tool shape or plan keeps failing. Record the failure signature, check whether the retry budget is exhausted, and change approach before you repeat the same failure a third time.
+20. Only use spawned sub-agents when the report itself requires independent verification or parallel evidence gathering. Follow OpenAI-aligned orchestration defaults: use **agents as tools** when a manager should retain control of the turn, use **handoffs** when routing should transfer ownership of the rest of the turn, and use code-orchestrated sequencing for deterministic reporting pipelines or bounded parallel branches.
+21. Keep local runtime state and memory storage separate from model-visible context unless they are intentionally exposed. Prefer filtered history or concise handoff packets over replaying the full transcript, choose one conversation continuation strategy per thread unless there is an explicit reconciliation plan, and preserve workflow names, trace metadata, plus validation evidence when a report spans multiple agents.
+22. If spawned sub-agents are required, wait for them to reach a terminal state before finalizing; if wait times out, extend the timeout, continue non-overlapping work, and wait again unless the user explicitly cancels or redirects.
+23. Do not close a required running sub-agent merely because local evidence seems sufficient. Within the same project or workstream, keep at most one live same-role agent, maintain a lightweight spawned-agent list keyed by role or workstream, and check that list before every `spawn_agent` call. Never spawn a second same-role sub-agent if one already exists; always reuse it with `send_input` or `resume_agent`, avoid `interrupt=true` unless the user explicitly cancels or redirects, and resume a closed same-role agent before considering any new spawn. Keep `fork_context` off unless the exact parent thread history is required.
+24. When the main agent has parallel sub-agents running, keep doing non-conflicting local work instead of idling. Separate write scopes before dispatch so parallel work stays efficient.
+25. When delegating, send a robust handoff covering the exact objective, constraints, relevant file paths, current findings, validation state, non-goals, and expected output.
+26. Before the final answer, reconcile every explicit user requirement against current evidence, rerun the scoped completion gate for non-trivial tasks, and do not present unresolved work as complete.
 
 ## Source Priority
 

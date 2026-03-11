@@ -8,30 +8,30 @@ This repository is a Codex-first skill pack for OpenAI Codex CLI. It ships speci
 
 You do not need to manually clone the whole repo first anymore.
 
-Download just the existing entry script for your platform and run it. If the full repo is not present yet, the script now bootstraps a managed clone into `~/.codex-skill-pack-repos/codex_skills`, then continues with the normal repo-managed install, menu, update, and status flows from there.
+Download just the existing entry script for your platform and run it. If the full repo is not present yet, the script now stages a fresh temporary clone for that run, refreshes the local entry script when a newer `sync-skills` file is available, restarts into the refreshed file, and then continues with the normal install, menu, update, and status flows. The temporary staged repo is deleted after the run unless you explicitly set `CODEX_SKILLS_REPOSITORY_PATH`.
 
 #### macOS and Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/UntaDotMy/codex_skills/main/sync-skills.sh -o sync-skills.sh
-bash ./sync-skills.sh install
+bash ./sync-skills.sh
 bash ./sync-skills.sh status
 ```
 
 Keep using the same file after that:
 
 ```bash
-bash ./sync-skills.sh menu
+bash ./sync-skills.sh
 bash ./sync-skills.sh update
 ```
 
-The one-file bootstrap copy now refreshes itself from the managed clone whenever it is writable, so the downloaded entry script does not stay stale after later repo updates.
+The one-file bootstrap copy now refreshes itself from the latest staged repo whenever it is writable, so the downloaded entry script does not stay stale after later repo updates. By default the staged repo is temporary and deleted after the run.
 
 #### Windows PowerShell
 
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/UntaDotMy/codex_skills/main/sync-skills.ps1 -OutFile .\sync-skills.ps1
-powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 ```
 
@@ -40,20 +40,19 @@ powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 Keep using the same file after that:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 update
 ```
 
-The one-file bootstrap copy now refreshes itself from the managed clone whenever it is writable, so the downloaded entry script does not stay stale after later repo updates.
+The one-file bootstrap copy now refreshes itself from the latest staged repo whenever it is writable, so the downloaded entry script does not stay stale after later repo updates. By default the staged repo is temporary and deleted after the run.
 
 Bootstrap environment overrides:
 
-- `CODEX_SKILLS_REPOSITORY_PATH` — change where the managed clone lives
+- `CODEX_SKILLS_REPOSITORY_PATH` — use an explicit repo path for the bootstrap flow instead of a fresh temporary staged clone
 - `CODEX_SKILLS_REPOSITORY_URL` — point the bootstrap flow at your fork or a local test repo
 - `CODEX_SKILLS_REPOSITORY_BRANCH` — clone a non-`main` branch
 - `CODEX_TARGET_OVERRIDE` — install into a different Codex home target
 
-If the default managed clone path is left half-created by an interrupted first run, the one-file bootstrap flow now repairs that default path automatically on the next attempt.
 
 ### AI-Assisted Install
 
@@ -149,8 +148,10 @@ The skill pack now documents and supports:
 - a scoped `working-buffer.md` for long tasks and context resets, activated around 60 percent context usage when the runtime exposes that signal
 - L1 or L2 or L3 memory organization with one home per fact
 - `trim` and `recalibrate` maintenance flows for scoped memory hygiene
+- loop_guard.py for evidence-backed anti-loop checks when the same failure shape keeps repeating
+- completion_gate.py for scoped requirement ledgers that block final closure until every explicit ask is done, while blocked items require an explicit blocker reason and still keep closure blocked
 - anti-loop, prompt-injection, and external-content-as-data guardrails
-- Octave-inspired non-MCP handoff discipline with bounded packets and manager-brokered agent feedback
+- agent_packets.py for Octave-inspired non-MCP handoff packets, readiness checks, and manager-brokered agent feedback
 - bounded self-awareness, self-healing, and self-learning loops grounded in memory maintenance, validation, and reward-or-penalty updates
 - cross-platform Python maintenance tooling for Windows, Linux, and macOS
 
@@ -172,9 +173,9 @@ On Windows PowerShell:
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
 ```
 
-If you launched from a one-file bootstrap copy, the script keeps using the managed clone at `~/.codex-skill-pack-repos/codex_skills` by default, so `menu`, `install`, `update`, and `status` keep working without a fresh manual clone step.
+If you launched from a one-file bootstrap copy without `CODEX_SKILLS_REPOSITORY_PATH`, the script stages a fresh temporary repo for that run, refreshes the saved launcher when a newer `sync-skills` file is available, and deletes the staged repo after the run completes.
 
-When that bootstrap file is writable, the managed clone also refreshes the downloaded entry script on later runs so your saved launcher stays aligned with the latest bootstrap logic.
+When the bootstrap file is writable, the staged repo also refreshes the downloaded entry script on later runs so your saved launcher stays aligned with the latest bootstrap logic before the staged repo is removed.
 
 The interactive manager now keeps only four clear choices:
 
@@ -203,7 +204,7 @@ The updater stays conservative about repo state:
 - it only pulls with `--ff-only`
 - it restarts into the refreshed manager when `sync-skills.sh` changed during that pull
 - it still syncs the current local repo state into Codex home when the repo is already ahead, diverged, dirty, or remote metadata is unavailable
-- it refreshes the external one-file launcher from the managed clone when that launcher is writable
+- it refreshes the external one-file launcher from the staged bootstrap repo when that launcher is writable
 
 Legacy alias: `github-update` still maps to `update`, but the primary flow is now just `update`.
 
@@ -237,18 +238,20 @@ Located in root directories (12 skill directories total).
 
 ### Codex CLI Skills (12 Total)
 
-1. **reviewer** - Production readiness, quality gates, DRY enforcement
-2. **software-development-life-cycle** - Architecture, planning, delivery, validation
-3. **web-development-life-cycle** - Web implementation, browser/runtime quality
-4. **mobile-development-life-cycle** - Mobile lifecycle, release, offline, platform behavior
-5. **backend-and-data-architecture** - APIs, contracts, data flow, service integration
-6. **cloud-and-devops-expert** - Infrastructure, CI/CD, release reliability, observability
-7. **qa-and-automation-engineer** - Test strategy, regression coverage, automation
-8. **security-and-compliance-auditor** - Threat modeling, secrets, remediation, compliance
-9. **ui-design-systems-and-responsive-interfaces** - Design systems, accessibility, visual execution
-10. **ux-research-and-experience-strategy** - UX framing, jobs-to-be-done, usability strategy
-11. **git-expert** - Repository-state safety, branching, recovery, review handoff
-12. **memory-status-reporter** - Daily learnings, mistake ledgers, tool-mistake tracking, and heuristic memory-health reporting
+1. **software-development-life-cycle** - Architecture, planning, delivery, and cross-domain validation
+2. **web-development-life-cycle** - Web implementation, browser/runtime quality
+3. **mobile-development-life-cycle** - Mobile lifecycle, release, offline, platform behavior
+4. **backend-and-data-architecture** - APIs, contracts, data flow, service integration
+5. **cloud-and-devops-expert** - Infrastructure, CI/CD, release reliability, observability
+6. **qa-and-automation-engineer** - Test strategy, regression coverage, automation
+7. **security-and-compliance-auditor** - Threat modeling, secrets, remediation, compliance
+8. **ui-design-systems-and-responsive-interfaces** - Design systems, accessibility, visual execution
+9. **ux-research-and-experience-strategy** - UX framing, jobs-to-be-done, usability strategy
+10. **git-expert** - Repository-state safety, branching, recovery, review handoff
+11. **memory-status-reporter** - Daily learnings, mistake ledgers, tool-mistake tracking, and heuristic memory-health reporting
+12. **reviewer** - Production readiness, quality gates, DRY enforcement, and final validation
+
+When the task clearly belongs to one surface, route to that specialist first. `reviewer` is the quality gate, not the default implementation owner.
 
 ### Use the UI Design-Intelligence Generator
 
@@ -402,7 +405,7 @@ The repo now also ships memory-status-reporter/scripts/agent_registry.py so same
 
 ### Completion Reconciliation
 
-Before any final answer, the active skill should reconcile every explicit user requirement against current evidence. That means re-reading the raw request, mapping each concrete ask to code or validation, looping back for any in-scope gap, and avoiding optional follow-up language when the user asked for completion. A progress, recap, audit, or "what is done or not done" request is not permission to stop if fixable in-scope work remains.
+Before any final answer, the active skill should reconcile every explicit user requirement against current evidence. That means re-reading the raw request, mapping each concrete ask to code or validation, looping back for any in-scope gap, and avoiding optional follow-up language when the user asked for completion. For non-trivial tasks, the repo now expects a scoped completion ledger in `completion-gate.json` maintained through `completion_gate.py`, and closure should not be claimed until `check` reports that every tracked requirement is done. If something is blocked, record the blocker explicitly and keep looping until it is resolved or honestly reported as the reason the work is still not complete. A progress, recap, audit, or "what is done or not done" request is not permission to stop if fixable in-scope work remains.
 
 ### Open-Source Pattern Notes
 

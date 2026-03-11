@@ -253,6 +253,8 @@ def normalize_rollout_metadata_path(path_value: str | None) -> str | None:
         normalized_path = "//" + normalized_path[len("//?/unc/") :]
     elif normalized_path.startswith("//?/"):
         normalized_path = normalized_path[len("//?/") :]
+    if normalized_path.startswith("/private/var/") or normalized_path.startswith("/private/tmp/"):
+        normalized_path = normalized_path[len("/private") :]
     normalized_path = normalized_path.rstrip("/")
     return normalized_path or None
 
@@ -283,7 +285,7 @@ def collect_workspace_rollout_matches(
     agent_instance: str | None = None,
     max_results: int = 8,
 ) -> list[Path]:
-    rollout_directory = memory_base.expanduser().resolve() / "rollout_summaries"
+    rollout_directory = memory_base.expanduser() / "rollout_summaries"
     if not rollout_directory.exists():
         return []
 

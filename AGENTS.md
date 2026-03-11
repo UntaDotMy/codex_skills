@@ -13,6 +13,7 @@ When no skill is explicitly mentioned:
 2. Use `software-development-life-cycle` when the work is mainly sequencing, cross-domain planning, or architecture framing
 3. Start with `reviewer` only for audits, production-readiness checks, explicit gap-finding, or final validation
 4. Return to `reviewer` for the final quality check when a separate implementation skill owned the work
+5. Be honest in user-facing reporting: state what is verified, what is inferred, and what remains blocked, partial, or unvalidated
 
 ### Specialist Skills
 
@@ -35,6 +36,7 @@ Load specialist skills when the task clearly requires domain expertise:
 
 - Don't load multiple skills for simple tasks
 - Use single skill when sufficient
+- Don't spawn `reviewer` as a reflex triage lane when a primary domain skill or single-agent path already fits
 - Let Codex CLI's native capabilities handle basic operations
 
 ## Multi-Agent Orchestration
@@ -365,6 +367,7 @@ REPEAT UNTIL CLEAN:
 **Before any final answer:**
 - Re-read the raw user request, the working brief, and the touched files.
 - Enumerate every explicit user requirement, complaint, acceptance criterion, and correction that appeared in the turn.
+- For non-trivial tasks, record those explicit requirements in the scoped completion ledger with `memory-status-reporter/scripts/completion_gate.py`, keep the ledger current as work progresses, and rerun `check` before closing.
 - Map each one to concrete code, docs, validation, or a verified blocker.
 - If any explicit requirement is still unresolved and is fixable in scope, loop back and finish it now.
 - A progress, recap, audit, or "what is done or not done" request does not suspend execution when fixable in-scope work remains; answer honestly, then continue the loop and finish the remaining work before the closing response.
@@ -373,6 +376,7 @@ REPEAT UNTIL CLEAN:
 
 **Exit criteria:**
 - Every explicit user requirement has a verified disposition grounded in current evidence.
+- For non-trivial tasks, `completion_gate.py check` reports that closure is ready, or it names the real blocker that prevents completion.
 - The final answer reflects completed work only and does not hide unfinished scope behind optional next-step wording.
 
 ### Flow Control

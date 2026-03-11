@@ -6,10 +6,6 @@ param(
 $defaultRepositoryUrl = "https://github.com/UntaDotMy/codex_skills.git"
 $defaultRepositoryBranch = "main"
 
-function Get-DefaultManagedRepositoryPath {
-    return (Join-Path $HOME ".codex-skill-pack-repos\codex_skills")
-}
-
 function Test-RepositoryLayoutComplete {
     param([string]$RepositoryPath)
 
@@ -20,18 +16,16 @@ function Test-RepositoryLayoutComplete {
         (Test-Path (Join-Path $RepositoryPath "reviewer\SKILL.md"))
 }
 
-function Get-ManagedRepositoryPath {
+function Get-RequestedRepositoryPath {
     if ($env:CODEX_SKILLS_REPOSITORY_PATH) {
         return $env:CODEX_SKILLS_REPOSITORY_PATH
     }
 
-    return (Get-DefaultManagedRepositoryPath)
+    return $null
 }
 
-function Test-ManagedRepositoryPathRepairable {
-    param([string]$RepositoryPath)
-
-    return $RepositoryPath -eq (Get-DefaultManagedRepositoryPath)
+function Test-BootstrapRepositoryPathIsPersistent {
+    return [bool]$env:CODEX_SKILLS_REPOSITORY_PATH
 }
 
 function Ensure-BootstrapGitAvailable {
@@ -41,68 +35,79 @@ function Ensure-BootstrapGitAvailable {
     }
 }
 
-function Ensure-ManagedRepositoryClone {
+function Prepare-BootstrapRepositoryForRun {
     param(
-        [string]$RepositoryPath,
         [string]$RepositoryUrl,
         [string]$RepositoryBranch,
         [string]$CurrentScriptRoot
     )
 
-    $temporaryRepositoryPath = $null
+    $requestedRepositoryPath = Get-RequestedRepositoryPath
+    if ($requestedRepositoryPath) {
+        if ((Test-Path (Join-Path $requestedRepositoryPath '.git')) -and (Test-RepositoryLayoutComplete -RepositoryPath $requestedRepositoryPath)) {
+            return $requestedRepositoryPath
+        }
 
-    if ((Test-Path (Join-Path $RepositoryPath '.git')) -and (Test-RepositoryLayoutComplete -RepositoryPath $RepositoryPath)) {
-        return
-    }
+        if ($requestedRepositoryPath -eq $CurrentScriptRoot) {
+            Write-Error "Standalone bootstrap cannot reuse the current script directory as the requested repository path: $requestedRepositoryPath"
+            exit 1
+        }
 
-    if ($RepositoryPath -eq $CurrentScriptRoot) {
-        Write-Error "Standalone bootstrap cannot reuse the current script directory as the managed clone path: $RepositoryPath"
-        exit 1
-    }
+        $repositoryParentPath = Split-Path -Parent $requestedRepositoryPath
+        if (-not (Test-Path $repositoryParentPath)) {
+            New-Item -ItemType Directory -Path $repositoryParentPath -Force | Out-Null
+        }
 
-    $repositoryParentPath = Split-Path -Parent $RepositoryPath
-    if (-not (Test-Path $repositoryParentPath)) {
-        New-Item -ItemType Directory -Path $repositoryParentPath -Force | Out-Null
-    }
-
-    if ((Test-Path $RepositoryPath) -and (Get-ChildItem -Force -ErrorAction SilentlyContinue $RepositoryPath | Select-Object -First 1)) {
-        if (Test-ManagedRepositoryPathRepairable -RepositoryPath $RepositoryPath) {
-            Write-Host "[INFO] Repairing invalid managed clone path: $RepositoryPath"
-            Remove-Item -Recurse -Force $RepositoryPath
-        } else {
-            Write-Error "Managed clone path exists but is not a valid codex_skills Git clone: $RepositoryPath"
+        if ((Test-Path $requestedRepositoryPath) -and (Get-ChildItem -Force -ErrorAction SilentlyContinue $requestedRepositoryPath | Select-Object -First 1)) {
+            Write-Error "Requested bootstrap repository path exists but is not a valid codex_skills Git clone: $requestedRepositoryPath"
             Write-Error "Remove that path or choose a clean CODEX_SKILLS_REPOSITORY_PATH before retrying."
             exit 1
         }
-    }
 
-    $temporaryRepositoryPath = Join-Path $repositoryParentPath ([System.IO.Path]::GetRandomFileName())
-    New-Item -ItemType Directory -Path $temporaryRepositoryPath -Force | Out-Null
-    Write-Host "[INFO] Cloning managed codex_skills repo into $RepositoryPath"
-    try {
-        & git clone --branch $RepositoryBranch --single-branch $RepositoryUrl $temporaryRepositoryPath
+        Write-Host "[INFO] Cloning requested codex_skills repo into $requestedRepositoryPath"
+        & git clone --branch $RepositoryBranch --single-branch $RepositoryUrl $requestedRepositoryPath
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }
+        return $requestedRepositoryPath
+    }
 
-        if (Test-Path $RepositoryPath) {
-            Remove-Item -Recurse -Force $RepositoryPath
-        }
-
-        Move-Item -Path $temporaryRepositoryPath -Destination $RepositoryPath
-        $temporaryRepositoryPath = $null
-    } finally {
-        if ($temporaryRepositoryPath -and (Test-Path $temporaryRepositoryPath)) {
+    $temporaryRepositoryPath = Join-Path ([System.IO.Path]::GetTempPath()) ("codex_skills.bootstrap." + [System.Guid]::NewGuid().ToString("N"))
+    Write-Host "[INFO] Cloning fresh temporary codex_skills repo for this run"
+    & git clone --branch $RepositoryBranch --single-branch $RepositoryUrl $temporaryRepositoryPath
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $temporaryRepositoryPath) {
             Remove-Item -Recurse -Force $temporaryRepositoryPath
         }
+        exit $LASTEXITCODE
+    }
+    return $temporaryRepositoryPath
+}
+
+function Remove-BootstrapRuntimeRepository {
+    $runtimeRepositoryPath = $env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH
+    if (-not $runtimeRepositoryPath) {
+        return
+    }
+
+    if ($env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT -eq "true") {
+        return
+    }
+
+    if (Test-Path $runtimeRepositoryPath) {
+        Remove-Item -Recurse -Force $runtimeRepositoryPath
     }
 }
+
+$script:BootstrapExternalScriptRefreshResult = "unchanged"
 
 function Sync-ExternalBootstrapScriptCopy {
     param(
         [string]$ExternalScriptPath,
         [string]$ManagedScriptPath
     )
+
+    $script:BootstrapExternalScriptRefreshResult = "unchanged"
 
     if (-not $ExternalScriptPath -or -not (Test-Path $ExternalScriptPath) -or -not (Test-Path $ManagedScriptPath)) {
         return
@@ -122,12 +127,37 @@ function Sync-ExternalBootstrapScriptCopy {
     try {
         Copy-Item -Path $ManagedScriptPath -Destination $temporaryScriptPath -Force
         Move-Item -Path $temporaryScriptPath -Destination $ExternalScriptPath -Force
-        Write-Host "[INFO] Refreshed standalone entry script from managed clone: $ExternalScriptPath"
+        Write-Host "[INFO] Refreshed standalone entry script from the staged bootstrap repo: $ExternalScriptPath"
+        $script:BootstrapExternalScriptRefreshResult = "refreshed"
     } catch {
         if (Test-Path $temporaryScriptPath) {
             Remove-Item -Force $temporaryScriptPath
         }
-        Write-Host "[INFO] Managed clone is newer, but the standalone entry script could not be refreshed automatically: $ExternalScriptPath"
+        $script:BootstrapExternalScriptRefreshResult = "failed"
+        Write-Host "[INFO] Staged bootstrap repo is newer, but the standalone entry script could not be refreshed automatically: $ExternalScriptPath"
+    }
+}
+
+function Invoke-BootstrapDelegateFromRepository {
+    param(
+        [string]$RepositoryPath,
+        [string]$DelegateScriptName,
+        [string[]]$DelegateArguments
+    )
+
+    $delegateScriptPath = Join-Path $RepositoryPath $DelegateScriptName
+    if (-not (Test-Path $delegateScriptPath)) {
+        Write-Error "Staged bootstrap repository is missing $DelegateScriptName: $RepositoryPath"
+        Remove-BootstrapRuntimeRepository
+        exit 1
+    }
+
+    Write-Host "[INFO] Using staged bootstrap repo: $RepositoryPath"
+    try {
+        & $delegateScriptPath @DelegateArguments
+        return $LASTEXITCODE
+    } finally {
+        Remove-BootstrapRuntimeRepository
     }
 }
 
@@ -145,24 +175,36 @@ function Refresh-BootstrapEntryScriptFromRepo {
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not (Test-RepositoryLayoutComplete -RepositoryPath $scriptRoot)) {
-    $env:CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH = $MyInvocation.MyCommand.Path
+    $currentScriptPath = $MyInvocation.MyCommand.Path
     Ensure-BootstrapGitAvailable
+
+    $runtimeRepositoryPath = $env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH
+    if ($runtimeRepositoryPath) {
+        if (-not (Test-RepositoryLayoutComplete -RepositoryPath $runtimeRepositoryPath)) {
+            Write-Error "Staged bootstrap repository is missing the required codex_skills files: $runtimeRepositoryPath"
+            exit 1
+        }
+
+        $delegateExitCode = Invoke-BootstrapDelegateFromRepository -RepositoryPath $runtimeRepositoryPath -DelegateScriptName "sync-skills.ps1" -DelegateArguments $ArgumentList
+        exit $delegateExitCode
+    }
 
     $repositoryUrl = if ($env:CODEX_SKILLS_REPOSITORY_URL) { $env:CODEX_SKILLS_REPOSITORY_URL } else { $defaultRepositoryUrl }
     $repositoryBranch = if ($env:CODEX_SKILLS_REPOSITORY_BRANCH) { $env:CODEX_SKILLS_REPOSITORY_BRANCH } else { $defaultRepositoryBranch }
-    $managedRepositoryPath = Get-ManagedRepositoryPath
+    $runtimeRepositoryPath = Prepare-BootstrapRepositoryForRun -RepositoryUrl $repositoryUrl -RepositoryBranch $repositoryBranch -CurrentScriptRoot $scriptRoot
+    $env:CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH = $currentScriptPath
+    $env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH = $runtimeRepositoryPath
+    $env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT = if (Test-BootstrapRepositoryPathIsPersistent) { "true" } else { "false" }
 
-    Ensure-ManagedRepositoryClone -RepositoryPath $managedRepositoryPath -RepositoryUrl $repositoryUrl -RepositoryBranch $repositoryBranch -CurrentScriptRoot $scriptRoot
-
-    $delegateScriptPath = Join-Path $managedRepositoryPath "sync-skills.ps1"
-    if (-not (Test-Path $delegateScriptPath)) {
-        Write-Error "Managed clone is missing sync-skills.ps1: $managedRepositoryPath"
-        exit 1
+    Sync-ExternalBootstrapScriptCopy -ExternalScriptPath $currentScriptPath -ManagedScriptPath (Join-Path $runtimeRepositoryPath (Split-Path -Leaf $currentScriptPath))
+    if ($script:BootstrapExternalScriptRefreshResult -eq "refreshed") {
+        Write-Host "[INFO] Restarting into the refreshed standalone entry script before continuing."
+        & $currentScriptPath @ArgumentList
+        exit $LASTEXITCODE
     }
 
-    Write-Host "[INFO] Using managed clone: $managedRepositoryPath"
-    & $delegateScriptPath @ArgumentList
-    exit $LASTEXITCODE
+    $delegateExitCode = Invoke-BootstrapDelegateFromRepository -RepositoryPath $runtimeRepositoryPath -DelegateScriptName "sync-skills.ps1" -DelegateArguments $ArgumentList
+    exit $delegateExitCode
 }
 Refresh-BootstrapEntryScriptFromRepo -CurrentScriptRoot $scriptRoot
 $gitBashCandidates = @(

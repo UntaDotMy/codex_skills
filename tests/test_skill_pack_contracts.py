@@ -92,6 +92,99 @@ def strip_ansi(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text).replace("\r", "")
 
 
+def current_repository_branch() -> str:
+    completed_process = subprocess.run(
+        ["git", "-C", str(REPOSITORY_ROOT), "branch", "--show-current"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed_process.returncode != 0:
+        raise AssertionError(completed_process.stdout + completed_process.stderr)
+    current_branch = completed_process.stdout.strip()
+    if current_branch:
+        return current_branch
+
+    fallback_process = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(REPOSITORY_ROOT),
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if fallback_process.returncode != 0:
+        raise AssertionError(fallback_process.stdout + fallback_process.stderr)
+    fallback_branch = next((line.strip() for line in fallback_process.stdout.splitlines() if line.strip()), "")
+    if not fallback_branch:
+        raise AssertionError("No local git branch is available for bootstrap clone tests.")
+    return fallback_branch
+
+
+def create_bootstrap_source_repository(parent_directory: Path) -> Path:
+    bootstrap_source_path = parent_directory / "bootstrap-source"
+    shutil.copytree(
+        REPOSITORY_ROOT,
+        bootstrap_source_path,
+        ignore=shutil.ignore_patterns(".git", "__pycache__", ".pytest_cache"),
+    )
+    commit_environment = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Codex Test",
+        "GIT_AUTHOR_EMAIL": "codex-test@example.com",
+        "GIT_COMMITTER_NAME": "Codex Test",
+        "GIT_COMMITTER_EMAIL": "codex-test@example.com",
+    }
+    branch_name = current_repository_branch()
+
+    init_process = subprocess.run(
+        ["git", "init", str(bootstrap_source_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=commit_environment,
+    )
+    if init_process.returncode != 0:
+        raise AssertionError(init_process.stdout + init_process.stderr)
+
+    checkout_process = subprocess.run(
+        ["git", "-C", str(bootstrap_source_path), "checkout", "-b", branch_name],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=commit_environment,
+    )
+    if checkout_process.returncode != 0:
+        raise AssertionError(checkout_process.stdout + checkout_process.stderr)
+
+    add_process = subprocess.run(
+        ["git", "-C", str(bootstrap_source_path), "add", "--all"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=commit_environment,
+    )
+    if add_process.returncode != 0:
+        raise AssertionError(add_process.stdout + add_process.stderr)
+
+    commit_process = subprocess.run(
+        ["git", "-C", str(bootstrap_source_path), "commit", "-m", "bootstrap snapshot"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=commit_environment,
+    )
+    if commit_process.returncode != 0:
+        raise AssertionError(commit_process.stdout + commit_process.stderr)
+
+    return bootstrap_source_path
+
+
 class SkillPackContractTests(unittest.TestCase):
     def test_every_skill_declares_use_this_skill_when(self) -> None:
         missing_sections: list[str] = []
@@ -190,6 +283,7 @@ class SkillPackContractTests(unittest.TestCase):
         missing_clarification_guidance: list[str] = []
         missing_reconciliation_guidance: list[str] = []
         missing_no_soft_stop_guidance: list[str] = []
+        missing_honesty_guidance: list[str] = []
 
         for skill_directory in SKILL_DIRECTORIES:
             yaml_text = read_text(skill_directory / "agents" / "openai.yaml")
@@ -209,6 +303,8 @@ class SkillPackContractTests(unittest.TestCase):
                 missing_reconciliation_guidance.append(skill_directory.name)
             if "status requests are checkpoints, not stop signals" not in yaml_text:
                 missing_no_soft_stop_guidance.append(skill_directory.name)
+            if "State what is verified, inferred, and still blocked or unvalidated" not in yaml_text:
+                missing_honesty_guidance.append(skill_directory.name)
 
         self.assertEqual([], missing_cache_guidance, f"missing cache guidance: {missing_cache_guidance}")
         self.assertEqual([], missing_autonomy_guidance, f"missing autonomy guidance: {missing_autonomy_guidance}")
@@ -218,6 +314,7 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertEqual([], missing_clarification_guidance, f"missing clarification guidance: {missing_clarification_guidance}")
         self.assertEqual([], missing_reconciliation_guidance, f"missing reconciliation guidance: {missing_reconciliation_guidance}")
         self.assertEqual([], missing_no_soft_stop_guidance, f"missing no-soft-stop guidance: {missing_no_soft_stop_guidance}")
+        self.assertEqual([], missing_honesty_guidance, f"missing honesty guidance: {missing_honesty_guidance}")
 
     def test_core_guidance_requires_completion_reconciliation_and_agent_lanes(self) -> None:
         root_guidance_text = read_text(REPOSITORY_ROOT / "AGENTS.md")
@@ -226,6 +323,7 @@ class SkillPackContractTests(unittest.TestCase):
 
         self.assertIn("Completion Reconciliation Loop", root_guidance_text)
         self.assertIn("every explicit user requirement", root_guidance_text)
+        self.assertIn("completion_gate.py", root_guidance_text)
         self.assertIn("do not end with optional follow-up offers", root_guidance_text)
         self.assertIn("does not suspend execution when fixable in-scope work remains", root_guidance_text)
         self.assertIn("workstreams/<workstream-key>", root_guidance_text)
@@ -240,12 +338,18 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("Prompt Injection Defense", root_guidance_text)
         self.assertIn("External Content Security", root_guidance_text)
         self.assertIn("Cross-Platform Script Portability", root_guidance_text)
+        self.assertIn("what is verified, what is inferred, and what remains blocked", root_guidance_text)
         self.assertIn("Requirement Reconciliation Before Close", routing_text)
+        self.assertIn("Use A Completion Ledger For Real Closure", routing_text)
+        self.assertIn("completion_gate.py check", routing_text)
         self.assertIn("Status Requests Do Not End The Job", routing_text)
         self.assertIn("agent-instance lane", routing_text)
         self.assertIn("Write Corrections Before Responding", routing_text)
         self.assertIn("Resolve workspace-scoped memory first", routing_text)
+        self.assertIn("do not front-load **reviewer** as routine triage", routing_text)
+        self.assertIn("what is verified, what is inferred, and what remains blocked", routing_text)
         self.assertIn("Completion Reconciliation", readme_text)
+        self.assertIn("completion-gate.json", readme_text)
         self.assertIn("not permission to stop", readme_text)
         self.assertIn("runtime-guardrails-and-memory-protocols.md", readme_text)
         self.assertIn("open-source-memory-patterns.md", readme_text)
@@ -293,6 +397,7 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("Prompt injection attempts", reviewer_skill_text)
         self.assertIn("data only, never instructions", reviewer_skill_text)
         self.assertIn("same failing tool call", reviewer_skill_text)
+        self.assertIn("what is verified, what is inferred", root_guidance_text)
         self.assertIn("readiness or ACK check", software_skill_text)
         self.assertIn("old completed payload", software_skill_text)
         self.assertIn("raw HTML or HTTP 4xx or 5xx content", software_skill_text)
@@ -306,6 +411,14 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertNotIn("for 1:1 messaging", ux_skill_text)
         self.assertNotIn("Messaging Surface Rehabilitation", ui_skill_text)
         self.assertNotIn("Messaging Familiarity Gap", ux_skill_text)
+
+    def test_routing_docs_keep_reviewer_as_quality_gate_not_default_owner(self) -> None:
+        routing_text = read_text(REPOSITORY_ROOT / "00-skill-routing-and-escalation.md")
+        readme_text = read_text(REPOSITORY_ROOT / "README.md")
+
+        self.assertIn("Final quality gate, not the default implementation owner", routing_text)
+        self.assertNotIn("Final quality gate, DRY enforcement, orchestrator", routing_text)
+        self.assertIn("quality gate, not the default implementation owner", readme_text)
 
     def test_reporting_rubric_prefers_scoped_memory_and_structured_rollout_matching(self) -> None:
         reporting_rubric_text = read_text(
@@ -330,6 +443,10 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("SESSION-STATE.md", skill_text)
         self.assertIn("working-buffer.md", skill_text)
         self.assertIn("memory_maintenance.py", skill_text)
+        self.assertIn("completion_gate.py", skill_text)
+        self.assertIn("scoped completion ledger", skill_text)
+        self.assertIn("agent_packets.py", skill_text)
+        self.assertIn("loop_guard.py", skill_text)
         self.assertIn("trim", skill_text)
         self.assertIn("recalibrate", skill_text)
         self.assertIn("## Security and Anti-Loop Guardrails", skill_text)
@@ -391,10 +508,15 @@ class SkillPackContractTests(unittest.TestCase):
             )
             self.assertEqual("Real-World Review Scenarios", completed_process.stdout.strip())
 
-    def test_standalone_bootstrap_copy_refreshes_from_managed_clone(self) -> None:
+    def test_standalone_bootstrap_copy_refreshes_from_fresh_temporary_clone_and_cleans_it_up(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             external_script_path = temporary_path / "sync-skills.sh"
+            temporary_bootstrap_directory = temporary_path / "tmp-bootstrap"
+            temporary_bootstrap_directory.mkdir()
+            home_directory = temporary_path / "home"
+            home_directory.mkdir()
+            bootstrap_source_path = create_bootstrap_source_repository(temporary_path)
             external_script_path.write_text(
                 "# stale bootstrap copy\n" + read_text(SYNC_SCRIPT_PATH),
                 encoding="utf-8",
@@ -403,21 +525,57 @@ class SkillPackContractTests(unittest.TestCase):
             completed_process = run_bash(
                 f'bash "{external_script_path}" status',
                 environment={
-                    "CODEX_SKILLS_REPOSITORY_PATH": str(REPOSITORY_ROOT),
+                    "CODEX_SKILLS_REPOSITORY_URL": str(bootstrap_source_path),
+                    "CODEX_SKILLS_REPOSITORY_BRANCH": current_repository_branch(),
                     "CODEX_TARGET_OVERRIDE": str(temporary_path / ".codex"),
+                    "HOME": str(home_directory),
+                    "TMPDIR": str(temporary_bootstrap_directory),
                 },
             )
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
             self.assertEqual(
                 completed_process.returncode,
                 0,
-                completed_process.stdout + completed_process.stderr,
+                normalized_output,
             )
+            self.assertIn("Restarting into the refreshed standalone entry script before continuing.", normalized_output)
             self.assertEqual(
                 read_text(SYNC_SCRIPT_PATH),
                 external_script_path.read_text(encoding="utf-8"),
             )
+            self.assertEqual([], list(temporary_bootstrap_directory.iterdir()))
+            self.assertFalse((home_directory / ".codex-skill-pack-repos").exists())
 
-    def test_powershell_bootstrap_copy_refreshes_from_managed_clone_when_available(self) -> None:
+    def test_standalone_bootstrap_without_arguments_opens_menu_and_cleans_up_temporary_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            external_script_path = temporary_path / "sync-skills.sh"
+            temporary_bootstrap_directory = temporary_path / "tmp-bootstrap"
+            temporary_bootstrap_directory.mkdir()
+            home_directory = temporary_path / "home"
+            home_directory.mkdir()
+            bootstrap_source_path = create_bootstrap_source_repository(temporary_path)
+            external_script_path.write_text(read_text(SYNC_SCRIPT_PATH), encoding="utf-8")
+
+            completed_process = run_bash(
+                f'printf "4\\n" | bash "{external_script_path}"',
+                environment={
+                    "CODEX_SKILLS_REPOSITORY_URL": str(bootstrap_source_path),
+                    "CODEX_SKILLS_REPOSITORY_BRANCH": current_repository_branch(),
+                    "CODEX_TARGET_OVERRIDE": str(temporary_path / ".codex"),
+                    "HOME": str(home_directory),
+                    "TMPDIR": str(temporary_bootstrap_directory),
+                },
+            )
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertEqual(0, completed_process.returncode, normalized_output)
+            self.assertIn("Codex Skill Manager", normalized_output)
+            self.assertIn("Install - install the skill pack", normalized_output)
+            self.assertIn("Quit", normalized_output)
+            self.assertEqual([], list(temporary_bootstrap_directory.iterdir()))
+            self.assertFalse((home_directory / ".codex-skill-pack-repos").exists())
+
+    def test_powershell_bootstrap_copy_refreshes_from_staged_repo_when_available(self) -> None:
         powershell_path = shutil.which("pwsh") or shutil.which("powershell")
         if powershell_path is None:
             self.skipTest("PowerShell runtime is not available in this environment.")
@@ -461,6 +619,62 @@ class SkillPackContractTests(unittest.TestCase):
                 external_script_path.read_text(encoding="utf-8"),
             )
 
+    def test_powershell_standalone_bootstrap_without_arguments_opens_menu_and_cleans_up_temporary_clone(self) -> None:
+        powershell_path = shutil.which("pwsh") or shutil.which("powershell")
+        if powershell_path is None:
+            self.skipTest("PowerShell runtime is not available in this environment.")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            external_script_path = temporary_path / "sync-skills.ps1"
+            staged_bootstrap_directory = temporary_path / "tmp-bootstrap"
+            staged_bootstrap_directory.mkdir()
+            home_directory = temporary_path / "home"
+            home_directory.mkdir()
+            bootstrap_source_path = create_bootstrap_source_repository(temporary_path)
+            managed_powershell_script_path = REPOSITORY_ROOT / "sync-skills.ps1"
+            external_script_path.write_text(
+                "# stale bootstrap copy\n" + read_text(managed_powershell_script_path),
+                encoding="utf-8",
+            )
+
+            completed_process = subprocess.run(
+                [
+                    powershell_path,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(external_script_path),
+                ],
+                cwd=temporary_path,
+                check=False,
+                capture_output=True,
+                text=True,
+                input="4\n",
+                env={
+                    **os.environ,
+                    "CODEX_SKILLS_REPOSITORY_URL": str(bootstrap_source_path),
+                    "CODEX_SKILLS_REPOSITORY_BRANCH": current_repository_branch(),
+                    "CODEX_TARGET_OVERRIDE": str(temporary_path / ".codex"),
+                    "HOME": str(home_directory),
+                    "TMPDIR": str(staged_bootstrap_directory),
+                    "TMP": str(staged_bootstrap_directory),
+                    "TEMP": str(staged_bootstrap_directory),
+                },
+            )
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertEqual(0, completed_process.returncode, normalized_output)
+            self.assertIn("Codex Skill Manager", normalized_output)
+            self.assertIn("Install - install the skill pack", normalized_output)
+            self.assertIn("Quit", normalized_output)
+            self.assertEqual(
+                read_text(managed_powershell_script_path),
+                external_script_path.read_text(encoding="utf-8"),
+            )
+            self.assertEqual([], list(staged_bootstrap_directory.iterdir()))
+            self.assertFalse((home_directory / ".codex-skill-pack-repos").exists())
+
     def test_menu_is_simplified_to_install_update_status_quit(self) -> None:
         completed_process = run_bash('printf "4\\n" | bash ./sync-skills.sh menu')
         normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
@@ -474,6 +688,15 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertNotIn("github-update", normalized_output)
         self.assertNotIn("remove full skill pack", normalized_output)
         self.assertNotIn("verify full skill pack", normalized_output)
+
+    def test_main_without_arguments_opens_menu_by_default(self) -> None:
+        completed_process = run_bash('printf "4\\n" | bash ./sync-skills.sh')
+        normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+
+        self.assertEqual(0, completed_process.returncode, normalized_output)
+        self.assertIn("Codex Skill Manager", normalized_output)
+        self.assertIn("Install - install the skill pack", normalized_output)
+        self.assertIn("Quit", normalized_output)
 
     def test_status_reports_manager_and_skill_update_summaries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1205,6 +1428,535 @@ Notes:
                 lookup_after_unhealthy_process.stdout + lookup_after_unhealthy_process.stderr,
             )
             self.assertEqual("null", lookup_after_unhealthy_process.stdout.strip())
+
+    def test_agent_packets_script_builds_handoff_feedback_and_readiness_packets(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "agent_packets.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            workspace_path = temporary_path / "workspace"
+            workspace_path.mkdir()
+            memory_base = temporary_path / "memories"
+
+            handoff_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "build-handoff",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--agent-instance",
+                    "manager-lane",
+                    "--source-agent-role",
+                    "reviewer",
+                    "--source-agent-id",
+                    "019review",
+                    "--source-agent-instance",
+                    "reviewer-lane-a",
+                    "--target-agent-role",
+                    "worker",
+                    "--target-agent-id",
+                    "019worker",
+                    "--target-agent-instance",
+                    "worker-lane-a",
+                    "--objective",
+                    "Implement the scoped cache refresh.",
+                    "--constraint",
+                    "Do not widen the write scope.",
+                    "--relevant-file",
+                    str(workspace_path / "research_cache.py"),
+                    "--finding",
+                    "Only stale handling needs the patch.",
+                    "--validation",
+                    "Current tests pass before the change.",
+                    "--non-goal",
+                    "Do not rewrite unrelated docs.",
+                    "--expected-output",
+                    "Return the changed files plus the validation result.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, handoff_process.returncode, handoff_process.stdout + handoff_process.stderr)
+            handoff_payload = json.loads(handoff_process.stdout)
+            self.assertEqual("handoff", handoff_payload["packet_kind"])
+            self.assertEqual("reviewer-lane-a", handoff_payload["source_agent"]["agent_instance"])
+            self.assertEqual("worker", handoff_payload["target_agent"]["role"])
+            self.assertEqual("worker-lane-a", handoff_payload["target_agent"]["agent_instance"])
+            self.assertTrue(Path(handoff_payload["packet_file"]).exists())
+
+            feedback_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "build-feedback",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--agent-instance",
+                    "manager-lane",
+                    "--source-agent-role",
+                    "reviewer",
+                    "--source-agent-id",
+                    "019review",
+                    "--source-agent-instance",
+                    "reviewer-lane-a",
+                    "--target-agent-role",
+                    "worker",
+                    "--target-agent-id",
+                    "019worker",
+                    "--target-agent-instance",
+                    "worker-lane-a",
+                    "--objective",
+                    "Close the validation gap before release.",
+                    "--feedback",
+                    "The stale-path regression still lacks a test.",
+                    "--request",
+                    "Add the missing regression test and rerun the targeted validation.",
+                    "--validation",
+                    "Lint passed but the release gate is still blocked.",
+                    "--expected-output",
+                    "Return the updated test result plus any remaining risk.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, feedback_process.returncode, feedback_process.stdout + feedback_process.stderr)
+            feedback_payload = json.loads(feedback_process.stdout)
+            self.assertEqual("feedback", feedback_payload["packet_kind"])
+            self.assertIn("The stale-path regression still lacks a test.", feedback_payload["feedback_items"])
+            self.assertEqual("reviewer-lane-a", feedback_payload["source_agent"]["agent_instance"])
+            self.assertEqual("worker-lane-a", feedback_payload["target_agent"]["agent_instance"])
+            self.assertTrue(Path(feedback_payload["packet_file"]).exists())
+
+            readiness_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "build-readiness-check",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--agent-instance",
+                    "manager-lane",
+                    "--source-agent-role",
+                    "reviewer",
+                    "--source-agent-id",
+                    "019review",
+                    "--source-agent-instance",
+                    "reviewer-lane-a",
+                    "--target-agent-role",
+                    "worker",
+                    "--target-agent-id",
+                    "019worker",
+                    "--target-agent-instance",
+                    "worker-lane-a",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, readiness_process.returncode, readiness_process.stdout + readiness_process.stderr)
+            readiness_payload = json.loads(readiness_process.stdout)
+            self.assertEqual("readiness-check", readiness_payload["packet_kind"])
+            self.assertIn("fresh ACK", readiness_payload["expected_output"][0])
+            self.assertEqual("reviewer-lane-a", readiness_payload["source_agent"]["agent_instance"])
+            self.assertEqual("worker-lane-a", readiness_payload["target_agent"]["agent_instance"])
+            self.assertTrue(Path(readiness_payload["packet_file"]).exists())
+
+    def test_loop_guard_script_flags_repeated_failures_until_resolved(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "loop_guard.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            workspace_path = temporary_path / "workspace"
+            workspace_path.mkdir()
+            memory_base = temporary_path / "memories"
+
+            first_failure_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "record-failure",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--signature",
+                    "validate-sync-heading",
+                    "--tool-name",
+                    "exec_command",
+                    "--summary",
+                    "The same validate invocation failed once.",
+                    "--hypothesis",
+                    "The heading matcher still uses stale input.",
+                    "--next-change",
+                    "Switch to the scoped helper before retrying.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                first_failure_process.returncode,
+                first_failure_process.stdout + first_failure_process.stderr,
+            )
+
+            first_check_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "check",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--signature",
+                    "validate-sync-heading",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, first_check_process.returncode, first_check_process.stdout + first_check_process.stderr)
+            first_check_payload = json.loads(first_check_process.stdout)
+            self.assertEqual(1, first_check_payload["repeat_count"])
+            self.assertFalse(first_check_payload["should_change_approach"])
+
+            second_failure_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "record-failure",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--signature",
+                    "validate-sync-heading",
+                    "--tool-name",
+                    "exec_command",
+                    "--summary",
+                    "The same validate invocation failed twice.",
+                    "--hypothesis",
+                    "The same stale input is still in play.",
+                    "--next-change",
+                    "Change the execution shape before retrying.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                second_failure_process.returncode,
+                second_failure_process.stdout + second_failure_process.stderr,
+            )
+
+            second_check_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "check",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--signature",
+                    "validate-sync-heading",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                second_check_process.returncode,
+                second_check_process.stdout + second_check_process.stderr,
+            )
+            second_check_payload = json.loads(second_check_process.stdout)
+            self.assertEqual(2, second_check_payload["repeat_count"])
+            self.assertTrue(second_check_payload["should_change_approach"])
+
+            resolve_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "resolve",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--signature",
+                    "validate-sync-heading",
+                    "--resolution",
+                    "Switched to the scoped helper and the next attempt passed.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, resolve_process.returncode, resolve_process.stdout + resolve_process.stderr)
+
+            resolved_check_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "check",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--signature",
+                    "validate-sync-heading",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                resolved_check_process.returncode,
+                resolved_check_process.stdout + resolved_check_process.stderr,
+            )
+            resolved_check_payload = json.loads(resolved_check_process.stdout)
+            self.assertEqual(0, resolved_check_payload["repeat_count"])
+            self.assertFalse(resolved_check_payload["should_change_approach"])
+
+    def test_normalize_rollout_metadata_path_collapses_macos_private_aliases(self) -> None:
+        scripts_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts"
+        sys.path.insert(0, str(scripts_path))
+        try:
+            from memory_store import normalize_rollout_metadata_path
+        finally:
+            sys.path.pop(0)
+
+        self.assertEqual(
+            "/var/folders/example/workspace",
+            normalize_rollout_metadata_path("/private/var/folders/example/workspace"),
+        )
+        self.assertEqual(
+            "/tmp/example/workspace",
+            normalize_rollout_metadata_path("/private/tmp/example/workspace"),
+        )
+
+    def test_completion_gate_reports_not_ready_without_recorded_requirements(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "completion_gate.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_path = Path(temporary_directory) / "workspace"
+            memory_base = Path(temporary_directory) / "memory-base"
+            workspace_path.mkdir()
+            memory_base.mkdir()
+
+            check_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "check",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-rollout",
+                    "--agent-instance",
+                    "reviewer-main",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, check_process.returncode, check_process.stdout + check_process.stderr)
+            payload = json.loads(check_process.stdout)
+            self.assertFalse(payload["closure_ready"])
+            self.assertEqual(0, payload["requirement_count"])
+            self.assertIn("No requirements are recorded yet", payload["next_actions"][0])
+
+    def test_completion_gate_requires_blocked_reason_for_blocked_requirements(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "completion_gate.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_path = Path(temporary_directory) / "workspace"
+            memory_base = Path(temporary_directory) / "memory-base"
+            workspace_path.mkdir()
+            memory_base.mkdir()
+
+            blocked_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "record-requirement",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-rollout",
+                    "--agent-instance",
+                    "reviewer-main",
+                    "--requirement-id",
+                    "requirement-1",
+                    "--text",
+                    "Explain the real blocker.",
+                    "--status",
+                    "blocked",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(0, blocked_process.returncode)
+            self.assertIn("--blocked-reason is required when --status blocked", blocked_process.stderr)
+
+    def test_completion_gate_requires_all_requirements_to_be_done_before_closure(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "completion_gate.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_path = Path(temporary_directory) / "workspace"
+            memory_base = Path(temporary_directory) / "memory-base"
+            workspace_path.mkdir()
+            memory_base.mkdir()
+
+            scope_arguments = [
+                "--memory-base",
+                str(memory_base),
+                "--workspace-root",
+                str(workspace_path),
+                "--workstream-key",
+                "feature-rollout",
+                "--agent-instance",
+                "reviewer-main",
+            ]
+
+            first_record_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "record-requirement",
+                    *scope_arguments,
+                    "--requirement-id",
+                    "requirement-1",
+                    "--text",
+                    "Ship the completion gate wiring.",
+                    "--status",
+                    "done",
+                    "--evidence",
+                    "Patched repo guidance.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                first_record_process.returncode,
+                first_record_process.stdout + first_record_process.stderr,
+            )
+
+            second_record_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "record-requirement",
+                    *scope_arguments,
+                    "--requirement-id",
+                    "requirement-2",
+                    "--text",
+                    "Validate the synced-home behavior.",
+                    "--status",
+                    "pending",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                second_record_process.returncode,
+                second_record_process.stdout + second_record_process.stderr,
+            )
+            pending_payload = json.loads(second_record_process.stdout)
+            self.assertFalse(pending_payload["closure_ready"])
+            self.assertEqual(1, pending_payload["pending_count"])
+
+            blocked_record_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "record-requirement",
+                    *scope_arguments,
+                    "--requirement-id",
+                    "requirement-2",
+                    "--text",
+                    "Validate the synced-home behavior.",
+                    "--status",
+                    "blocked",
+                    "--blocked-reason",
+                    "Validation environment is offline.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                blocked_record_process.returncode,
+                blocked_record_process.stdout + blocked_record_process.stderr,
+            )
+            blocked_payload = json.loads(blocked_record_process.stdout)
+            self.assertFalse(blocked_payload["closure_ready"])
+            self.assertEqual(1, blocked_payload["blocked_count"])
+
+            done_record_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "record-requirement",
+                    *scope_arguments,
+                    "--requirement-id",
+                    "requirement-2",
+                    "--text",
+                    "Validate the synced-home behavior.",
+                    "--status",
+                    "done",
+                    "--evidence",
+                    "Ran sync validation successfully.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                done_record_process.returncode,
+                done_record_process.stdout + done_record_process.stderr,
+            )
+            done_payload = json.loads(done_record_process.stdout)
+            self.assertTrue(done_payload["closure_ready"])
+            self.assertEqual(2, done_payload["done_count"])
+            self.assertEqual(0, done_payload["blocked_count"])
+            self.assertTrue(done_payload["ledger_path"].endswith("completion-gate.json"))
 
     def test_install_uses_repo_managed_refresh_when_pack_is_installed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
