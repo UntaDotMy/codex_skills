@@ -94,9 +94,32 @@ function Remove-BootstrapRuntimeRepository {
         return
     }
 
+    if (-not (Test-CurrentScriptOwnsRuntimeRepository -CurrentScriptPath $script:CurrentBootstrapScriptPath)) {
+        return
+    }
+
     if (Test-Path $runtimeRepositoryPath) {
         Remove-Item -Recurse -Force $runtimeRepositoryPath
     }
+}
+
+function Test-CurrentScriptOwnsRuntimeRepository {
+    param([string]$CurrentScriptPath)
+
+    if (-not $env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH) {
+        return $false
+    }
+
+    $runtimeEntryScriptPath = if ($env:CODEX_BOOTSTRAP_RUNTIME_ENTRY_SCRIPT_PATH) {
+        $env:CODEX_BOOTSTRAP_RUNTIME_ENTRY_SCRIPT_PATH
+    } else {
+        $env:CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH
+    }
+    if (-not $runtimeEntryScriptPath -or -not $CurrentScriptPath) {
+        return $false
+    }
+
+    return [System.IO.Path]::GetFullPath($runtimeEntryScriptPath) -eq [System.IO.Path]::GetFullPath($CurrentScriptPath)
 }
 
 $script:BootstrapExternalScriptRefreshResult = "unchanged"
@@ -173,12 +196,20 @@ function Refresh-BootstrapEntryScriptFromRepo {
     Sync-ExternalBootstrapScriptCopy -ExternalScriptPath $externalScriptPath -ManagedScriptPath $managedScriptPath
 }
 
-$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$script:CurrentBootstrapScriptPath = $MyInvocation.MyCommand.Path
+$scriptRoot = Split-Path -Parent $script:CurrentBootstrapScriptPath
 if (-not (Test-RepositoryLayoutComplete -RepositoryPath $scriptRoot)) {
-    $currentScriptPath = $MyInvocation.MyCommand.Path
+    $currentScriptPath = $script:CurrentBootstrapScriptPath
     Ensure-BootstrapGitAvailable
 
     $runtimeRepositoryPath = $env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH
+    if ($runtimeRepositoryPath -and -not (Test-CurrentScriptOwnsRuntimeRepository -CurrentScriptPath $currentScriptPath)) {
+        Remove-Item Env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT -ErrorAction SilentlyContinue
+        Remove-Item Env:CODEX_BOOTSTRAP_RUNTIME_ENTRY_SCRIPT_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH -ErrorAction SilentlyContinue
+        $runtimeRepositoryPath = $null
+    }
     if ($runtimeRepositoryPath) {
         if (-not (Test-RepositoryLayoutComplete -RepositoryPath $runtimeRepositoryPath)) {
             Write-Error "Staged bootstrap repository is missing the required codex_skills files: $runtimeRepositoryPath"
@@ -194,6 +225,7 @@ if (-not (Test-RepositoryLayoutComplete -RepositoryPath $scriptRoot)) {
     $runtimeRepositoryPath = Prepare-BootstrapRepositoryForRun -RepositoryUrl $repositoryUrl -RepositoryBranch $repositoryBranch -CurrentScriptRoot $scriptRoot
     $env:CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH = $currentScriptPath
     $env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH = $runtimeRepositoryPath
+    $env:CODEX_BOOTSTRAP_RUNTIME_ENTRY_SCRIPT_PATH = $currentScriptPath
     $env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT = if (Test-BootstrapRepositoryPathIsPersistent) { "true" } else { "false" }
 
     Sync-ExternalBootstrapScriptCopy -ExternalScriptPath $currentScriptPath -ManagedScriptPath (Join-Path $runtimeRepositoryPath (Split-Path -Leaf $currentScriptPath))

@@ -115,10 +115,22 @@ bootstrap_cleanup_runtime_repository() {
     if [[ "${CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT:-false}" == "true" ]]; then
         return 0
     fi
+    if ! bootstrap_current_script_owns_runtime_repository; then
+        return 0
+    fi
 
     if [[ -d "$runtime_repository_path" ]]; then
         rm -rf "$runtime_repository_path"
     fi
+}
+
+bootstrap_current_script_owns_runtime_repository() {
+    local current_script_path="${BASH_SOURCE[0]}"
+    local runtime_entry_script_path="${CODEX_BOOTSTRAP_RUNTIME_ENTRY_SCRIPT_PATH:-${CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH:-}}"
+
+    [[ -n "${CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH:-}" ]] || return 1
+    [[ -n "$runtime_entry_script_path" ]] || return 1
+    [[ "$current_script_path" == "$runtime_entry_script_path" ]]
 }
 
 BOOTSTRAP_EXTERNAL_SCRIPT_REFRESH_RESULT="unchanged"
@@ -193,6 +205,13 @@ bootstrap_delegate_if_needed() {
     repository_branch="${CODEX_SKILLS_REPOSITORY_BRANCH:-$BOOTSTRAP_DEFAULT_REPOSITORY_BRANCH}"
 
     runtime_repository_path="${CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH:-}"
+    if [[ -n "$runtime_repository_path" ]] && ! bootstrap_current_script_owns_runtime_repository; then
+        unset CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH
+        unset CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT
+        unset CODEX_BOOTSTRAP_RUNTIME_ENTRY_SCRIPT_PATH
+        unset CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH
+        runtime_repository_path=""
+    fi
     if [[ -n "$runtime_repository_path" ]]; then
         if ! bootstrap_repository_layout_is_complete "$runtime_repository_path"; then
             bootstrap_print_error "Staged bootstrap repository is missing the required codex_skills files: $runtime_repository_path"
@@ -218,6 +237,7 @@ bootstrap_delegate_if_needed() {
     runtime_repository_path="$(bootstrap_prepare_repository_for_run "$repository_url" "$repository_branch")"
     export CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH="$current_script_path"
     export CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH="$runtime_repository_path"
+    export CODEX_BOOTSTRAP_RUNTIME_ENTRY_SCRIPT_PATH="$current_script_path"
     if bootstrap_repository_path_is_persistent; then
         export CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT="true"
     else

@@ -412,6 +412,43 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertNotIn("Messaging Surface Rehabilitation", ui_skill_text)
         self.assertNotIn("Messaging Familiarity Gap", ux_skill_text)
 
+    def test_core_guidance_requires_robustness_beyond_happy_path(self) -> None:
+        routing_text = read_text(REPOSITORY_ROOT / "00-skill-routing-and-escalation.md")
+        software_skill_text = read_text(
+            REPOSITORY_ROOT / "software-development-life-cycle" / "SKILL.md"
+        )
+        reviewer_skill_text = read_text(REPOSITORY_ROOT / "reviewer" / "SKILL.md")
+        qa_skill_text = read_text(REPOSITORY_ROOT / "qa-and-automation-engineer" / "SKILL.md")
+
+        self.assertIn(
+            "realistic failure, recovery, stale-state, retry, concurrency, and hostile-input scenarios",
+            routing_text,
+        )
+        self.assertIn(
+            "stale state, inherited environment variables, retries, partial cleanup, and concurrent or nested execution",
+            software_skill_text,
+        )
+        self.assertIn(
+            "cover the adjacent recovery or containment path",
+            software_skill_text,
+        )
+        self.assertIn(
+            "validated only on the happy path",
+            reviewer_skill_text,
+        )
+        self.assertIn(
+            "stale state, inherited environment, retries, cleanup ownership, concurrency, or hostile input",
+            reviewer_skill_text,
+        )
+        self.assertIn(
+            "happy path, failure path, recovery path, and one abuse or hostile-state path",
+            qa_skill_text,
+        )
+        self.assertIn(
+            "stale state, retries, env inheritance, partial cleanup, race conditions, or untrusted input",
+            qa_skill_text,
+        )
+
     def test_routing_docs_keep_reviewer_as_quality_gate_not_default_owner(self) -> None:
         routing_text = read_text(REPOSITORY_ROOT / "00-skill-routing-and-escalation.md")
         readme_text = read_text(REPOSITORY_ROOT / "README.md")
@@ -575,6 +612,47 @@ class SkillPackContractTests(unittest.TestCase):
             self.assertEqual([], list(temporary_bootstrap_directory.iterdir()))
             self.assertFalse((home_directory / ".codex-skill-pack-repos").exists())
 
+    def test_standalone_bootstrap_ignores_inherited_foreign_runtime_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            external_script_path = temporary_path / "sync-skills.sh"
+            temporary_bootstrap_directory = temporary_path / "tmp-bootstrap"
+            temporary_bootstrap_directory.mkdir()
+            home_directory = temporary_path / "home"
+            home_directory.mkdir()
+            bootstrap_source_path = create_bootstrap_source_repository(temporary_path)
+            inherited_runtime_repository_path = temporary_path / "inherited-runtime-repository"
+            shutil.copytree(bootstrap_source_path, inherited_runtime_repository_path)
+            external_script_path.write_text(
+                "# stale bootstrap copy\n" + read_text(SYNC_SCRIPT_PATH),
+                encoding="utf-8",
+            )
+
+            completed_process = run_bash(
+                f'bash "{external_script_path}" status',
+                environment={
+                    "CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH": str(temporary_path / "foreign-sync-skills.sh"),
+                    "CODEX_BOOTSTRAP_RUNTIME_ENTRY_SCRIPT_PATH": str(temporary_path / "foreign-sync-skills.sh"),
+                    "CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH": str(inherited_runtime_repository_path),
+                    "CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT": "false",
+                    "CODEX_SKILLS_REPOSITORY_URL": str(bootstrap_source_path),
+                    "CODEX_SKILLS_REPOSITORY_BRANCH": current_repository_branch(),
+                    "CODEX_TARGET_OVERRIDE": str(temporary_path / ".codex"),
+                    "HOME": str(home_directory),
+                    "TMPDIR": str(temporary_bootstrap_directory),
+                },
+            )
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertEqual(
+                completed_process.returncode,
+                0,
+                normalized_output,
+            )
+            self.assertIn("Restarting into the refreshed standalone entry script before continuing.", normalized_output)
+            self.assertNotIn(str(inherited_runtime_repository_path), normalized_output)
+            self.assertTrue(inherited_runtime_repository_path.exists())
+            self.assertEqual([], list(temporary_bootstrap_directory.iterdir()))
+
     def test_powershell_bootstrap_copy_refreshes_from_staged_repo_when_available(self) -> None:
         powershell_path = shutil.which("pwsh") or shutil.which("powershell")
         if powershell_path is None:
@@ -674,6 +752,67 @@ class SkillPackContractTests(unittest.TestCase):
             )
             self.assertEqual([], list(staged_bootstrap_directory.iterdir()))
             self.assertFalse((home_directory / ".codex-skill-pack-repos").exists())
+
+    def test_powershell_bootstrap_ignores_inherited_foreign_runtime_repository(self) -> None:
+        powershell_path = shutil.which("pwsh") or shutil.which("powershell")
+        if powershell_path is None:
+            self.skipTest("PowerShell runtime is not available in this environment.")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            external_script_path = temporary_path / "sync-skills.ps1"
+            staged_bootstrap_directory = temporary_path / "tmp-bootstrap"
+            staged_bootstrap_directory.mkdir()
+            home_directory = temporary_path / "home"
+            home_directory.mkdir()
+            bootstrap_source_path = create_bootstrap_source_repository(temporary_path)
+            inherited_runtime_repository_path = temporary_path / "inherited-runtime-repository"
+            shutil.copytree(bootstrap_source_path, inherited_runtime_repository_path)
+            managed_powershell_script_path = REPOSITORY_ROOT / "sync-skills.ps1"
+            external_script_path.write_text(
+                "# stale bootstrap copy\n" + read_text(managed_powershell_script_path),
+                encoding="utf-8",
+            )
+
+            completed_process = subprocess.run(
+                [
+                    powershell_path,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(external_script_path),
+                    "status",
+                ],
+                cwd=temporary_path,
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "CODEX_BOOTSTRAP_ORIGINAL_SCRIPT_PATH": str(temporary_path / "foreign-sync-skills.ps1"),
+                    "CODEX_BOOTSTRAP_RUNTIME_ENTRY_SCRIPT_PATH": str(temporary_path / "foreign-sync-skills.ps1"),
+                    "CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PATH": str(inherited_runtime_repository_path),
+                    "CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT": "false",
+                    "CODEX_SKILLS_REPOSITORY_URL": str(bootstrap_source_path),
+                    "CODEX_SKILLS_REPOSITORY_BRANCH": current_repository_branch(),
+                    "CODEX_TARGET_OVERRIDE": str(temporary_path / ".codex"),
+                    "HOME": str(home_directory),
+                    "TMPDIR": str(staged_bootstrap_directory),
+                    "TMP": str(staged_bootstrap_directory),
+                    "TEMP": str(staged_bootstrap_directory),
+                },
+            )
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertEqual(0, completed_process.returncode, normalized_output)
+            self.assertIn("Restarting into the refreshed standalone entry script before continuing.", normalized_output)
+            self.assertNotIn(str(inherited_runtime_repository_path), normalized_output)
+            self.assertTrue(inherited_runtime_repository_path.exists())
+            self.assertEqual(
+                read_text(managed_powershell_script_path),
+                external_script_path.read_text(encoding="utf-8"),
+            )
+            self.assertEqual([], list(staged_bootstrap_directory.iterdir()))
 
     def test_menu_is_simplified_to_install_update_status_quit(self) -> None:
         completed_process = run_bash('printf "4\\n" | bash ./sync-skills.sh menu')

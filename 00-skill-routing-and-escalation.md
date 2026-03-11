@@ -23,6 +23,7 @@ This document defines how skills should route to each other, when to escalate to
 17. **Avoid Retry Loops**: Do not repeat the same failing tool pattern or search loop more than twice without a new hypothesis or a narrower scope
 18. **Write Corrections Before Responding**: When the user supplies a correction or durable decision, persist it to scoped session state before composing the response
 19. **Report Honestly**: Tell the user what is verified, what is inferred, and what remains blocked, partial, or unvalidated instead of smoothing uncertainty away
+20. **Robustness Beats Happy-Path Theater**: Before closing a task or approving tests, think through the realistic failure, recovery, stale-state, retry, concurrency, and hostile-input scenarios that materially fit the change, then validate the ones that could actually hurt users
 
 ## Routing Authority and Overlap Resolution
 

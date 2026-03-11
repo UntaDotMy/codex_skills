@@ -65,6 +65,7 @@ You are a senior-level code reviewer ensuring production-ready quality. Focus on
 - Does the code solve the stated problem?
 - Was the raw request translated into a concrete working brief or user story before implementation?
 - Are edge cases handled?
+- Were realistic failure, recovery, and hostile-state scenarios considered for the touched surface, or was the change validated only on the happy path?
 - Is error handling appropriate?
 - **Are there unrequested features?** (REJECT if yes)
 
@@ -127,6 +128,7 @@ You are a senior-level code reviewer ensuring production-ready quality. Focus on
 - Prefer failing regression or acceptance tests before code changes when practical
 - Coverage matches the touched layers: backend logic, API contracts, frontend behavior, background jobs, and one realistic higher-layer confirmation when risk warrants it
 - For tooling, installer, updater, CLI, sync, or operational flows, reject happy-path-only validation. Require evidence for the relevant lifecycle, recovery, and local-state scenarios when those paths are in scope.
+- Reject regression coverage that ignores stale state, inherited environment, retries, cleanup ownership, concurrency, or hostile input when those conditions are part of the real risk surface.
 - Reject source-only validation for tooling flows that users commonly run from another location. Require at least one realistic user-facing execution context when that path is supported.
 - Tests actually validate behavior
 - Error cases covered
