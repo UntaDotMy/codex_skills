@@ -22,7 +22,7 @@ Keep using the same file after that:
 
 ```bash
 bash ./sync-skills.sh menu
-bash ./sync-skills.sh github-update
+bash ./sync-skills.sh update
 ```
 
 The one-file bootstrap copy now refreshes itself from the managed clone whenever it is writable, so the downloaded entry script does not stay stale after later repo updates.
@@ -35,11 +35,13 @@ powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 ```
 
+`sync-skills.ps1` is a Windows wrapper around the same Bash manager, so Install, Update, Status, and the interactive menu stay aligned with `sync-skills.sh`. It requires Git Bash on Windows and probes the common Git for Windows install paths for you.
+
 Keep using the same file after that:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
-powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 github-update
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 update
 ```
 
 The one-file bootstrap copy now refreshes itself from the managed clone whenever it is writable, so the downloaded entry script does not stay stale after later repo updates.
@@ -117,12 +119,11 @@ powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 
 ### Start Using It
 
-After installation, you can immediately use the manager and verification flow:
+After installation, you can immediately use the manager and the simple update/status flow:
 
 ```bash
 bash ./sync-skills.sh menu
-bash ./sync-skills.sh github-update
-bash ./sync-skills.sh verify
+bash ./sync-skills.sh update
 bash ./sync-skills.sh status
 ```
 
@@ -130,8 +131,7 @@ On Windows PowerShell, use the wrapper:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
-powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 github-update
-powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 verify
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 update
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 ```
 
@@ -139,13 +139,28 @@ powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 
 - Codex CLI with `js_repl`, `memories`, and `multi_agent` enabled
 - Python 3 for memory-report tooling and sync helpers, available as `python`, `python3`, or `py -3`
-- Git Bash on Windows for the Bash runner; `sync-skills.ps1` locates it for you
+- Git Bash on Windows for the Bash runner; `sync-skills.ps1` delegates to `sync-skills.sh` and locates common Git Bash installs for you
+
+### Runtime Guardrails and Memory Maintenance
+
+The skill pack now documents and supports:
+
+- write-ahead session-state persistence with `SESSION-STATE.md` and `session-wal.jsonl`
+- a scoped `working-buffer.md` for long tasks and context resets, activated around 60 percent context usage when the runtime exposes that signal
+- L1 or L2 or L3 memory organization with one home per fact
+- `trim` and `recalibrate` maintenance flows for scoped memory hygiene
+- anti-loop, prompt-injection, and external-content-as-data guardrails
+- Octave-inspired non-MCP handoff discipline with bounded packets and manager-brokered agent feedback
+- bounded self-awareness, self-healing, and self-learning loops grounded in memory maintenance, validation, and reward-or-penalty updates
+- cross-platform Python maintenance tooling for Windows, Linux, and macOS
+
+See [runtime-guardrails-and-memory-protocols.md](docs/runtime-guardrails-and-memory-protocols.md), [open-source-memory-patterns.md](docs/open-source-memory-patterns.md), [security-audit-status.md](docs/security-audit-status.md), and [context-efficiency-playbook.md](docs/context-efficiency-playbook.md).
 
 ## Setup Reference
 
 ### Interactive Manager
 
-Use the same script in interactive mode when you want install, sync, update, GitHub refresh, remove, verify, and status in one menu:
+Use the same script in interactive mode when you want the simplest flow in one menu:
 
 ```bash
 bash ./sync-skills.sh menu
@@ -157,44 +172,40 @@ On Windows PowerShell:
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
 ```
 
-If you launched from a one-file bootstrap copy, the script keeps using the managed clone at `~/.codex-skill-pack-repos/codex_skills` by default, so `menu` and `github-update` keep working without a fresh manual clone step.
+If you launched from a one-file bootstrap copy, the script keeps using the managed clone at `~/.codex-skill-pack-repos/codex_skills` by default, so `menu`, `install`, `update`, and `status` keep working without a fresh manual clone step.
 
 When that bootstrap file is writable, the managed clone also refreshes the downloaded entry script on later runs so your saved launcher stays aligned with the latest bootstrap logic.
 
-The interactive manager now handles all of the following in one place:
+The interactive manager now keeps only four clear choices:
 
-- install the full repo-managed skill pack
-- force-sync the skill pack
-- detect drift with MD5 and apply only the required repo-managed changes
-- fetch the latest upstream repo changes with a safe fast-forward-only GitHub update
-- remove one installed skill or the full repo-managed pack
-- verify copied files with MD5 checksums
-- detect repo and installed versions
-- detect stale or old installed files before refresh
-- prune repo-managed skills that were removed from the source repository
+- Install: install the full repo-managed skill pack when missing, or refresh only the changed repo-managed files when it is already installed
+- Update: check for repo or manager updates first, restart into the refreshed `sync-skills.sh` when that file changed, then update the installed skill pack
+- Status: show manager version, self-update state, skill-pack update state, versions, wiring, and checksum drift
+- Quit: leave the menu without side effects
 
-### GitHub Updates
+### Update Behavior
 
-Use local `update` when you already changed the clone on disk and only want to sync those repo-managed changes into `~/.codex`.
+`install` is now idempotent. If the pack is missing, it performs a full install. If the pack already exists, it applies only the needed repo-managed changes, including `AGENTS.md` and `00-skill-routing-and-escalation.md` when those changed.
 
-Use `github-update` when you want the menu or CLI to fetch the latest version from the tracked GitHub remote, fast-forward the local clone, and then sync only the changed files into Codex home:
+`update` is now the single smart update path. It first checks the tracked Git remote when one is configured, fast-forwards the repo when it is behind, restarts into the refreshed `sync-skills.sh` if that manager script changed, and then syncs only the changed files into Codex home:
 
 ```bash
-./sync-skills.sh github-update
+./sync-skills.sh update
 ```
 
 ```powershell
-./sync-skills.ps1 github-update
+./sync-skills.ps1 update
 ```
 
-The GitHub updater is intentionally conservative:
+The updater stays conservative about repo state:
 
-- it requires a clean local working tree before pulling
-- it fetches the tracked upstream or the remote default branch
+- it fetches the tracked upstream or the remote default branch when Git metadata is available
 - it only pulls with `--ff-only`
-- it stops if the local branch is already ahead of the tracked remote
-- it aborts on divergence so local work is never silently overwritten
-- when launched from a one-file bootstrap copy, it also refreshes that external launcher from the managed clone when the file is writable
+- it restarts into the refreshed manager when `sync-skills.sh` changed during that pull
+- it still syncs the current local repo state into Codex home when the repo is already ahead, diverged, dirty, or remote metadata is unavailable
+- it refreshes the external one-file launcher from the managed clone when that launcher is writable
+
+Legacy alias: `github-update` still maps to `update`, but the primary flow is now just `update`.
 
 ## Directory Structure
 
@@ -293,7 +304,7 @@ For interactive Windows use outside Codex runtime, prefer the PowerShell wrapper
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install
-powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 github-update
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 update
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 uninstall
 ```
 
@@ -348,10 +359,15 @@ The memory workflow is intentionally human-style, but still evidence-bound.
 ### Memory Layers
 
 - **Working memory** — the current working brief, active files, and validation target
+- **Workspace memory** — shared notes for the current repo or workstream under `~/.codex/memories/workspaces/<workspace-slug>/`
+- **Workstream memory** — branch, feature-lane, or focused task notes under `~/.codex/memories/workspaces/<workspace-slug>/workstreams/<workstream-key>/`
+- **Role memory** — role-local notes under `~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/` so reused reviewer, worker, or architect agents can resume without replaying everything
+- **Agent-instance memory** — one bounded note lane under `~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/instances/<agent-instance>/` so a reused sub-agent keeps its own context instead of smearing it across every same-role lane
 - **Episodic memory** — rollout summaries and recent task evidence
 - **Durable memory** — indexed learnings and recurring user preferences in `~/.codex/memories/MEMORY.md` and `~/.codex/memories/memory_summary.md`
-- **Research cache** — reusable source-backed findings with freshness notes so future work can research only what is new
+- **Research cache** — reusable source-backed findings with freshness notes in `~/.codex/memories/research_cache/<workspace-slug>/cache.jsonl` so future work can research only what is new
 - **Reinforcement memory** — rewarded patterns that worked and penalty patterns that future work should avoid or refresh
+- **Archive** — older or noisy material under `~/.codex/memories/archive/<workspace-slug>/workstreams/<workstream-key>/` after it has been superseded by fresher scoped notes
 
 ### Reward, Penalty, and Research Reuse
 
@@ -363,6 +379,38 @@ Use the memory system like a compact engineering learning loop:
 - refresh only the findings that are date-sensitive, version-sensitive, or disproven by newer evidence
 
 This keeps the system from re-researching the same solved question on every task while still forcing a loop back to live research when cached knowledge is stale or uncertain.
+
+### Scoped Memory and Cache Helpers
+
+Resolve the current workspace and optional role scope before loading memory broadly:
+
+```bash
+python3 ~/.codex/skills/memory-status-reporter/scripts/resolve_memory_scope.py --memory-base ~/.codex/memories --workspace-root "$PWD" --agent-role reviewer --workstream-key feature-review --agent-instance reviewer-lane-a --create-missing
+```
+
+Check or record reusable research without redoing the whole web loop:
+
+```bash
+python3 ~/.codex/skills/memory-status-reporter/scripts/research_cache.py lookup --memory-base ~/.codex/memories --workspace-root "$PWD" --workstream-key feature-review --query "your research question"
+python3 ~/.codex/skills/memory-status-reporter/scripts/research_cache.py record --memory-base ~/.codex/memories --workspace-root "$PWD" --workstream-key feature-review --agent-role reviewer --agent-instance reviewer-lane-a --question "your research question" --answer "concise reusable answer" --source "https://example.com" --freshness "refresh when the API version changes"
+python3 ~/.codex/skills/memory-status-reporter/scripts/research_cache.py archive-stale --memory-base ~/.codex/memories --workspace-root "$PWD" --workstream-key feature-review
+```
+
+The shared cache is workspace-scoped, while workstream, role, and agent-instance notes let reused sub-agents pick up the same workstream without a full transcript replay.
+
+The repo now also ships memory-status-reporter/scripts/agent_registry.py so same-role lanes can be registered, looked up, listed, and marked unhealthy per workstream instead of relying on recall alone.
+
+### Completion Reconciliation
+
+Before any final answer, the active skill should reconcile every explicit user requirement against current evidence. That means re-reading the raw request, mapping each concrete ask to code or validation, looping back for any in-scope gap, and avoiding optional follow-up language when the user asked for completion. A progress, recap, audit, or "what is done or not done" request is not permission to stop if fixable in-scope work remains.
+
+### Open-Source Pattern Notes
+
+The current memory layout is intentionally aligned to live open-source patterns such as project-scoped memory, Mem0 multi-scope memory, and repoMemory branch or worktree isolation. See [docs/open-source-memory-patterns.md](./docs/open-source-memory-patterns.md) for the applied rules and source links.
+
+### Security Audit Status
+
+The repo now carries an honest status artifact instead of an uncited score claim. See [docs/security-audit-status.md](./docs/security-audit-status.md) for what is actually validated today, what is still only partial, and what evidence would be required before publishing a numeric security score.
 
 ### Compact Learning Snapshot
 
@@ -378,13 +426,13 @@ These values are derived from saved artifacts. They are not literal cognition me
 ### Run the Full Report
 
 ```bash
-python3 ~/.codex/skills/memory-status-reporter/scripts/memory_status_report.py --memory-base ~/.codex/memories
+python3 ~/.codex/skills/memory-status-reporter/scripts/memory_status_report.py --memory-base ~/.codex/memories --workspace-root "$PWD"
 ```
 
 ### Run the Compact Footer Version
 
 ```bash
-python3 ~/.codex/skills/memory-status-reporter/scripts/memory_status_report.py --memory-base ~/.codex/memories --format compact
+python3 ~/.codex/skills/memory-status-reporter/scripts/memory_status_report.py --memory-base ~/.codex/memories --workspace-root "$PWD" --format compact
 ```
 
 ## Development Workflow
@@ -397,9 +445,11 @@ python3 ~/.codex/skills/memory-status-reporter/scripts/memory_status_report.py -
 ./sync-skills.sh status
 ```
 
-The update command is a repo-managed delta update. It refreshes only changed skills and root files, then removes repo-managed skills that disappeared from the source tree.
+The update command now checks for manager or repo updates first, restarts into the refreshed `sync-skills.sh` when needed, then refreshes only changed skills and root files and removes repo-managed skills that disappeared from the source tree.
 
-If the repo-managed skill pack is not installed in the target Codex home yet, both `update` and `github-update` now bootstrap a full install automatically instead of failing with a partial-state error.
+If the repo-managed skill pack is not installed in the target Codex home yet, `update` boots into a full install automatically instead of failing with a partial-state error.
+
+For advanced checksum-only troubleshooting, `./sync-skills.sh verify` is still available.
 
 ### Uninstall Skills
 
@@ -413,7 +463,7 @@ To remove one installed skill only:
 ./sync-skills.sh uninstall reviewer
 ```
 
-`uninstall reviewer` removes that skill from the current Codex home immediately, but the next full-pack `install`, `sync`, `update`, or `github-update` restores any repo-managed skill that still exists in this repository. Use full-pack `uninstall` when you want the repo-managed install state to become fully absent.
+`uninstall reviewer` removes that skill from the current Codex home immediately, but the next full-pack `install` or `update` restores any repo-managed skill that still exists in this repository. Use full-pack `uninstall` when you want the repo-managed install state to become fully absent.
 
 On Windows PowerShell, use:
 
@@ -477,9 +527,9 @@ Also verify `./sync-skills.sh status` reports full agent inheritance unless you 
 
 The installer now probes `python3`, `python`, and `py -3` before editing Codex home. If install still fails, verify at least one of these commands launches Python 3 successfully from the same shell session.
 
-### GitHub update says the repo is dirty or diverged
+### Update says the repo is dirty or diverged
 
-The new `github-update` command refuses to overwrite local work. If it stops, either commit your local changes, stash them, push them and use plain `./sync-skills.sh update`, or reset the clone to the upstream state you want, then rerun `./sync-skills.sh github-update`.
+`update` now keeps the workflow simple. If the repo is dirty, ahead, or diverged, it skips the remote self-update step and still syncs the current local repo state into Codex home. If you want the local repo itself to match upstream first, reconcile the Git state separately, then rerun `./sync-skills.sh update`. The legacy `github-update` alias still points to the same behavior.
 
 ### Memory footer looks thin
 

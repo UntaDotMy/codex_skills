@@ -8,6 +8,14 @@ from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from memory_store import (
+    collect_workspace_rollout_matches,
+    load_research_cache_entries,
+    parse_timestamp,
+    resolve_memory_scope,
+    summarize_research_cache_entry,
+)
+
 
 @dataclass
 class RolloutSummary:
@@ -130,6 +138,30 @@ def parse_arguments() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Optional output file path.",
+    )
+    parser.add_argument(
+        "--workspace-root",
+        type=Path,
+        default=None,
+        help="Optional workspace root for scoped memory and research-cache reporting.",
+    )
+    parser.add_argument(
+        "--agent-role",
+        type=str,
+        default=None,
+        help="Optional agent role for role-local scoped reporting.",
+    )
+    parser.add_argument(
+        "--workstream-key",
+        type=str,
+        default=None,
+        help="Optional workstream or branch key for a narrower reporting lane.",
+    )
+    parser.add_argument(
+        "--agent-instance",
+        type=str,
+        default=None,
+        help="Optional agent-instance lane for per-agent scoped reporting.",
     )
     return parser.parse_args()
 
@@ -260,13 +292,18 @@ def classify_issue(issue_text: str, all_tasks_succeeded: bool) -> str:
     return "unclear"
 
 
-def collect_rollout_summaries(memory_base: Path, timezone_value: ZoneInfo) -> list[RolloutSummary]:
+def collect_rollout_summaries(
+    memory_base: Path,
+    timezone_value: ZoneInfo,
+    file_paths: list[Path] | None = None,
+) -> list[RolloutSummary]:
     rollout_directory = memory_base / "rollout_summaries"
-    if not rollout_directory.exists():
+    if file_paths is None and not rollout_directory.exists():
         return []
 
+    candidate_paths = file_paths if file_paths is not None else sorted(rollout_directory.glob("*.md"))
     summaries: list[RolloutSummary] = []
-    for file_path in sorted(rollout_directory.glob("*.md")):
+    for file_path in candidate_paths:
         parsed_summary = parse_rollout_summary(file_path, timezone_value)
         if parsed_summary is not None:
             summaries.append(parsed_summary)
@@ -317,6 +354,32 @@ def collect_memory_learnings(memory_text: str) -> list[str]:
         if in_learning_block and stripped_line.startswith("- "):
             learnings.append(stripped_line[2:].strip())
     return learnings
+
+
+def collect_simple_bullets(memory_text: str) -> list[str]:
+    return [
+        stripped_line[2:].strip()
+        for stripped_line in (line.strip() for line in memory_text.splitlines())
+        if stripped_line.startswith("- ")
+    ]
+
+
+def read_optional_text(file_path: Path | None) -> str:
+    if file_path is None or not file_path.exists():
+        return ""
+    return file_path.read_text(encoding="utf-8")
+
+
+def deduplicate_preserving_order(items: list[str]) -> list[str]:
+    seen_items: set[str] = set()
+    unique_items: list[str] = []
+    for item in items:
+        normalized_item = item.strip()
+        if not normalized_item or normalized_item in seen_items:
+            continue
+        seen_items.add(normalized_item)
+        unique_items.append(normalized_item)
+    return unique_items
 
 
 def build_recent_context(
@@ -431,17 +494,68 @@ def format_percentage(numerator: int, denominator: int) -> str:
     return f"{(100 * numerator / denominator):.1f}%"
 
 
+def collect_recent_scoped_cache_entries(
+    scoped_cache_entries: list[dict],
+    window_start: datetime,
+    window_end: datetime,
+    timezone_value: ZoneInfo,
+) -> list[dict]:
+    recent_entries: list[dict] = []
+    for entry in scoped_cache_entries:
+        updated_at = parse_timestamp(str(entry.get("updated_at") or entry.get("recorded_at")))
+        if updated_at is None:
+            continue
+        localized_updated_at = updated_at.astimezone(timezone_value)
+        if window_start <= localized_updated_at < window_end:
+            recent_entries.append(entry)
+    recent_entries.sort(
+        key=lambda entry: parse_timestamp(str(entry.get("updated_at") or entry.get("recorded_at"))) or datetime.min.replace(
+            tzinfo=UTC
+        )
+    )
+    return recent_entries
+
+
 def build_report_payload(
     memory_base: Path,
     anchor_date: date,
     days: int,
     timezone_value: ZoneInfo,
+    workspace_root: Path | None = None,
+    agent_role: str | None = None,
+    workstream_key: str | None = None,
+    agent_instance: str | None = None,
 ) -> dict:
-    all_summaries = collect_rollout_summaries(memory_base, timezone_value)
+    memory_scope = resolve_memory_scope(
+        memory_base=memory_base,
+        workspace_root=workspace_root,
+        agent_role=agent_role,
+        workstream_key=workstream_key,
+        agent_instance=agent_instance,
+    )
+    matching_rollout_paths = (
+        collect_workspace_rollout_matches(
+            memory_base,
+            memory_scope.workspace_root,
+            workstream_key=memory_scope.workstream_key,
+            agent_instance=memory_scope.agent_instance,
+            max_results=64,
+        )
+        if workspace_root is not None
+        else None
+    )
+    all_summaries = collect_rollout_summaries(memory_base, timezone_value, file_paths=matching_rollout_paths)
 
     window_end = datetime.combine(anchor_date, time.min, timezone_value) + timedelta(days=1)
     window_start = window_end - timedelta(days=days)
     window_summaries = collect_window_summaries(all_summaries, window_start, window_end)
+    scoped_cache_entries = load_research_cache_entries(memory_scope)
+    recent_scoped_cache_entries = collect_recent_scoped_cache_entries(
+        scoped_cache_entries,
+        window_start,
+        window_end,
+        timezone_value,
+    )
 
     task_outcomes = [
         task_outcome
@@ -467,12 +581,34 @@ def build_report_payload(
         for summary in window_summaries
         for cache_update in summary.research_cache_updates
     ]
+    research_cache_updates.extend(
+        summarize_research_cache_entry(cache_entry)
+        for cache_entry in recent_scoped_cache_entries
+    )
     stale_findings = [
         stale_finding
         for summary in window_summaries
         for stale_finding in summary.stale_findings
     ]
+    stale_findings.extend(
+        summarize_research_cache_entry(cache_entry)
+        for cache_entry in scoped_cache_entries
+        if str(cache_entry.get("status", "fresh")).lower() in {"stale", "superseded"}
+    )
     repeated_penalty_patterns = collect_repeated_penalty_patterns(window_summaries)
+    rewarded_patterns = [
+        *rewarded_patterns,
+        *(
+            summarize_research_cache_entry(cache_entry)
+            for cache_entry in recent_scoped_cache_entries
+            if str(cache_entry.get("reinforcement", "neutral")).lower() == "rewarded"
+        ),
+    ]
+    repeated_penalty_patterns.extend(
+        summarize_research_cache_entry(cache_entry)
+        for cache_entry in recent_scoped_cache_entries
+        if str(cache_entry.get("reinforcement", "neutral")).lower() == "penalty"
+    )
 
     classified_issues = []
     for summary in window_summaries:
@@ -507,13 +643,57 @@ def build_report_payload(
         if classify_research_cache_update(cache_update) == "refresh"
     ]
 
-    memory_text = (memory_base / "MEMORY.md").read_text(encoding="utf-8") if (memory_base / "MEMORY.md").exists() else ""
-    memory_summary_text = (memory_base / "memory_summary.md").read_text(encoding="utf-8") if (memory_base / "memory_summary.md").exists() else ""
+    agent_instance_memory_text = read_optional_text(memory_scope.agent_instance_memory_file)
+    agent_memory_text = read_optional_text(memory_scope.agent_memory_file)
+    workstream_memory_text = read_optional_text(memory_scope.workstream_memory_file)
+    workstream_summary_text = read_optional_text(memory_scope.workstream_summary_file)
+    session_state_text = read_optional_text(memory_scope.session_state_file)
+    working_buffer_text = read_optional_text(memory_scope.working_buffer_file)
+    workspace_memory_text = read_optional_text(memory_scope.workspace_memory_file)
+    workspace_summary_text = read_optional_text(memory_scope.workspace_summary_file)
+    global_memory_text = read_optional_text(memory_scope.global_memory_file)
+    global_summary_text = read_optional_text(memory_scope.global_summary_file)
+    session_state_items = [f"Session state: {item}" for item in collect_simple_bullets(session_state_text)[-4:]]
+    working_buffer_items = [f"Working buffer: {item}" for item in collect_simple_bullets(working_buffer_text)[-4:]]
 
-    memory_learnings = collect_memory_learnings(memory_text)
-    user_needs = collect_user_needs(memory_summary_text)
-    general_tips = collect_general_tips(memory_summary_text)
+    scoped_memory_learnings = deduplicate_preserving_order(
+        collect_memory_learnings(agent_instance_memory_text)
+        + collect_memory_learnings(agent_memory_text)
+        + collect_memory_learnings(workstream_memory_text)
+        + collect_memory_learnings(workspace_memory_text)
+    )
+    memory_learnings = deduplicate_preserving_order(
+        scoped_memory_learnings + collect_memory_learnings(global_memory_text)
+    )
+    user_needs = deduplicate_preserving_order(
+        collect_user_needs(workstream_summary_text)
+        + collect_user_needs(workspace_summary_text)
+        + collect_user_needs(global_summary_text)
+    )
+    general_tips = deduplicate_preserving_order(
+        collect_general_tips(workstream_summary_text)
+        + collect_general_tips(workspace_summary_text)
+        + collect_general_tips(global_summary_text)
+    )
+    if not reusable_knowledge:
+        reusable_knowledge = scoped_memory_learnings[:]
+    else:
+        reusable_knowledge = deduplicate_preserving_order(reusable_knowledge + scoped_memory_learnings)
     durable_bank_size = len(memory_learnings) + len(user_needs) + len(general_tips)
+    closure_ready = failed_tasks == 0 and partial_tasks == 0 and len(open_issues) == 0 and len(unclear_issues) == 0
+    self_healing_actions: list[str] = []
+    if partial_tasks > 0:
+        self_healing_actions.append(
+            "Reconcile every explicit user requirement against evidence before presenting the work as complete."
+        )
+    if open_issues:
+        self_healing_actions.append("Resolve captured open issues before closing the active workstream.")
+    if unclear_issues:
+        self_healing_actions.append("Clarify unclear issues or upgrade them into explicit validation tasks before finalizing.")
+    if stale_findings:
+        self_healing_actions.append("Refresh or archive stale research-cache entries before reusing them in future turns.")
+    if not self_healing_actions:
+        self_healing_actions.append("No automatic self-healing action is pending in the requested window.")
 
     growth_units = len(reusable_knowledge) + len(resolved_issues)
     growth_units_by_day = compute_daily_growth_units(all_summaries)
@@ -530,6 +710,10 @@ def build_report_payload(
         "window_start": window_start.date().isoformat(),
         "window_end": (window_end - timedelta(days=1)).date().isoformat(),
         "days": days,
+        "workspace_slug": memory_scope.workspace_slug,
+        "workstream_key": memory_scope.workstream_key,
+        "agent_role": memory_scope.agent_role,
+        "agent_instance": memory_scope.agent_instance,
         "status": compute_status(
             len(window_summaries),
             failed_tasks,
@@ -546,6 +730,8 @@ def build_report_payload(
             "partial": partial_tasks,
             "failed": failed_tasks,
         },
+        "closure_ready": closure_ready,
+        "self_healing_actions": self_healing_actions,
         "learning_items": reusable_knowledge,
         "rewarded_patterns": rewarded_patterns,
         "penalty_patterns": penalty_patterns,
@@ -587,11 +773,32 @@ def build_report_payload(
         "cache_freshness_risk": len(stale_findings),
         "brain_growth_rate": format_percentage(growth_units, durable_bank_size),
         "learning_momentum": None if momentum_value is None else f"{momentum_value:.1f}%",
-        "recent_context": build_recent_context(all_summaries, window_start),
+        "recent_context": deduplicate_preserving_order(
+            session_state_items + working_buffer_items + build_recent_context(all_summaries, window_start)
+        ),
         "source_files": {
             "memory": str(memory_base / "MEMORY.md"),
             "memory_summary": str(memory_base / "memory_summary.md"),
+            "raw_memories": str(memory_scope.raw_memories_file),
             "rollout_directory": str(memory_base / "rollout_summaries"),
+            "workspace_memory": str(memory_scope.workspace_memory_file),
+            "workspace_summary": str(memory_scope.workspace_summary_file),
+            "workstream_memory": str(memory_scope.workstream_memory_file),
+            "workstream_summary": str(memory_scope.workstream_summary_file),
+            "session_state": str(memory_scope.session_state_file),
+            "working_buffer": str(memory_scope.working_buffer_file),
+            "wal": str(memory_scope.wal_file),
+            "workspace_reference_directory": str(memory_scope.workspace_reference_directory),
+            "workstream_reference_directory": str(memory_scope.workstream_reference_directory),
+            "agent_memory": None if memory_scope.agent_memory_file is None else str(memory_scope.agent_memory_file),
+            "agent_instance_memory": (
+                None if memory_scope.agent_instance_memory_file is None else str(memory_scope.agent_instance_memory_file)
+            ),
+            "research_cache": str(memory_scope.research_cache_file),
+            "matching_rollout_summaries": [
+                str(rollout_match)
+                for rollout_match in (matching_rollout_paths or [])
+            ],
         },
     }
     return report_payload
@@ -665,7 +872,7 @@ def render_markdown(report_payload: dict) -> str:
         (
             "- Sources: "
             f"{report_payload['summary_count']} rollout summary file(s), "
-            "MEMORY.md, and memory_summary.md"
+            "MEMORY.md, memory_summary.md, and scoped workspace memory/cache files"
         ),
         "",
         "## What I Learned",
@@ -699,6 +906,13 @@ def render_markdown(report_payload: dict) -> str:
         ]
     )
     lines.extend(f"- {line}" for line in research_cache_lines)
+    lines.extend(
+        [
+            "",
+            "## Self-Healing Queue",
+        ]
+    )
+    lines.extend(f"- {line}" for line in report_payload["self_healing_actions"])
     lines.extend(
         [
             "",
@@ -771,6 +985,7 @@ def render_compact_markdown(report_payload: dict) -> str:
         "## Learning Snapshot",
         f"- Window: {report_payload['window_start']} to {report_payload['window_end']}",
         f"- Status: {report_payload['status']} ({report_payload['confidence']} confidence)",
+        f"- Closure ready: {'yes' if report_payload['closure_ready'] else 'no'}",
         "- Learned today:",
     ]
     lines.extend(f"  - {line}" for line in learning_lines)
@@ -791,6 +1006,7 @@ def render_compact_markdown(report_payload: dict) -> str:
                 f"reward strength {report_payload['reward_strength']} with {rewarded_pattern_count} rewarded pattern(s), "
                 f"penalty pressure {report_payload['penalty_pressure']}, cache freshness risk {stale_cache_count}"
             ),
+            f"- Self-healing queue: {report_payload['self_healing_actions'][0]}",
             (
                 "- Memory health (heuristic): "
                 f"brain size {report_payload['durable_bank_size']}, "
@@ -817,6 +1033,10 @@ def main() -> None:
         anchor_date=anchor_date,
         days=arguments.days,
         timezone_value=timezone_value,
+        workspace_root=arguments.workspace_root,
+        agent_role=arguments.agent_role,
+        workstream_key=arguments.workstream_key,
+        agent_instance=arguments.agent_instance,
     )
 
     if arguments.format == "json":

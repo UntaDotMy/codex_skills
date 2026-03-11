@@ -97,10 +97,26 @@ Avoid:
 Use a human-style engineering analogy:
 
 - **working memory** = active brief, current files, immediate validation target
+- **workspace memory** = shared repo notes keyed by workspace slug
+- **workstream memory** = focused branch, feature, or task notes under `~/.codex/memories/workspaces/<workspace-slug>/workstreams/<workstream-key>/`
+- **role memory** = reviewer, worker, architect, or other role-local notes under `~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/`
+- **agent-instance memory** = one bounded lane under `~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/instances/<agent-instance>/` so reused sub-agents keep local context without loading every same-role note
 - **episodic memory** = rollout summaries and recent task outcomes
 - **durable memory** = indexed lessons and persistent user preferences
+- **research cache** = freshness-aware reusable findings shared across agents in the same workspace
+- **archive** = older or superseded scoped notes that should not be replayed by default
 
 The point is not to mimic biology literally. The point is to stop replaying everything on every task.
+
+### Scoped Retrieval Order
+
+Before you load memory broadly:
+
+- resolve the workspace and optional role scope first
+- read agent-instance, role-local, workstream, and workspace notes before global durable memory
+- check the shared workspace research cache before a new web-search loop
+- mark stale or disproven findings stale or superseded instead of silently reusing them
+- archive noisy older notes when fresher scoped notes supersede them, and use the archive only when current scoped lanes are too thin
 
 ### Compression and Summarization
 
@@ -120,6 +136,9 @@ Use the smallest acceptable step for classification, routing, candidate filterin
 - `AGENTS.md` requires a working brief before research or coding
 - `AGENTS.md` requires a context retrieval ladder before broad context loading
 - `sync-skills.sh` injects the shared execution-policy lines, including the cache-first research reuse gate, into `~/.codex/config.toml`
+- `sync-skills.sh` scaffolds workspace, workstream, role, agent-instance, research-cache, archive, and report directories under `~/.codex/memories/`
+- `memory-status-reporter/scripts/resolve_memory_scope.py` resolves scoped search order and write targets for the active workspace
+- `memory-status-reporter/scripts/research_cache.py` provides shared lookup, record, stale, archive, and reward operations for reusable research
 - `memory-status-reporter/scripts/memory_status_report.py --format compact` provides the final-answer learning footer
 - `README.md` documents the setup and operational workflow
 
@@ -128,6 +147,9 @@ Use the smallest acceptable step for classification, routing, candidate filterin
 - Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks — https://arxiv.org/abs/2005.11401
 - LongLLMLingua: Accelerating and Enhancing LLMs in Long Context Scenarios via Prompt Compression — https://arxiv.org/abs/2310.06839
 - OpenAI Prompt Caching 101 — https://cookbook.openai.com/examples/prompt_caching101
+- Anthropic Claude Code memory hierarchy — https://docs.anthropic.com/en/docs/claude-code/memory
+- OpenHands microagents and memory condensation patterns — https://docs.all-hands.dev/openhands/usage/prompting/microagents
+- Mem0 scoped memory patterns for user, app, agent, and run context — https://github.com/mem0ai/mem0
 - OpenAI latency optimization guide — https://platform.openai.com/docs/guides/latency-optimization
 - OpenAI model page for GPT-5 mini — https://platform.openai.com/docs/models/gpt-5-mini
 - GitHub code search syntax — https://docs.github.com/en/search-github/github-code-search/understanding-github-code-search-syntax

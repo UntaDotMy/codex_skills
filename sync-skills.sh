@@ -23,6 +23,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP_DEFAULT_REPOSITORY_URL="https://github.com/UntaDotMy/codex_skills.git"
 BOOTSTRAP_DEFAULT_REPOSITORY_BRANCH="main"
 CODEX_SOURCE="$SCRIPT_DIR"
+SYNC_SKILLS_MANAGER_VERSION="2026.03.11.1"
+SYNC_SKILLS_INTERNAL_UPDATE_RESUME_COMMAND="__resume-after-self-update"
 
 resolve_default_bootstrap_repository_path() {
     printf "%s/.codex-skill-pack-repos/codex_skills\n" "$HOME"
@@ -251,16 +253,21 @@ MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- Route to memory-status-reporter for memory status, daily learning recaps, mistake ledgers, user-needs summaries, and heuristic growth reporting."
     "- Start every non-trivial task by translating the raw request into a working brief: user story, desired outcome, constraints, assumptions, acceptance criteria, edge cases, and validation plan."
     "- Strengthen vague prompts from repository, runtime, and memory evidence before acting; if business logic remains ambiguous, clarify instead of drifting."
+    "- When business intent remains ambiguous after repository and runtime inspection, use request_user_input to confirm direction instead of guessing."
     "- For code work, prefer test-first when practical by starting with a failing test or executable acceptance check before implementation."
     "- Keep researching during implementation whenever APIs, tools, edge cases, or best practices are uncertain; do not trust stale memory alone."
     "- When validation, testing, or review reveals another in-scope bug or quality gap, keep iterating in the same turn and fix the next issue before handing off; only stop early when blocked by ambiguity, external access limits, or a clearly labeled out-of-scope item."
     "- Before starting a fresh research loop, check local memory and any freshness-aware research cache for a matching reusable finding; reuse it when the recorded freshness still fits the task, and only go to live external research for what is missing, stale, uncertain, or explicitly time-sensitive."
+    "- Resolve workspace-scoped memory and shared research-cache paths before loading broad global memory: prefer ~/.codex/memories/workspaces/<workspace-slug>/ for shared project notes, ~/.codex/memories/workspaces/<workspace-slug>/workstreams/<workstream-key>/ for focused task notes, ~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/ for role-local notes, ~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/instances/<agent-instance>/ for reused agent-instance notes, and archive stale or superseded findings instead of replaying all history."
     "- Use a context retrieval ladder to save tokens: exact file or symbol search first, then targeted snippets, then full-file reads only for the files you will edit or directly depend on."
     "- Prefer surgical patches and modular edits: change only impacted ranges, keep stable prefixes for cache reuse, and avoid rewriting whole files when a targeted patch is sufficient."
     "- Prefer modular structure: keep entrypoints thin, move named logic into focused files, and separate backend, API, frontend, workers, and tests when the project spans those concerns."
     "- Before finalizing non-trivial work, re-read the working brief, acceptance criteria, and touched files, then append a compact Learning Snapshot grounded in memory artifacts when available."
+    "- Before the final answer, reconcile every explicit user requirement against current evidence and do not present unresolved work as complete."
+    "- A progress, recap, audit, or \"what is done or not done\" request does not suspend execution when fixable in-scope work remains; answer honestly, then continue the loop until the requested job is actually complete."
     "- If a tool call fails or is misused and the fix teaches a reusable lesson, record it as a mistake with tool name, symptom, cause, fix, and prevention note in rollout summaries and durable memory."
     "- Promote validated wins into rewarded patterns, repeated mistakes into penalty patterns, and reusable research into a freshness-aware cache so future tasks research only what is new."
+    "- If a required sub-agent is still needed, do not use send_input(..., interrupt=true) or close it to rush synthesis; reuse the same live agent, keep the handoff bounded, and wait for terminal state unless the user explicitly cancels or redirects."
 )
 
 config_has_required_memory_status_lines() {
@@ -721,6 +728,10 @@ get_repo_version() {
     git -C "$CODEX_SOURCE" rev-parse --short HEAD 2>/dev/null || echo "unknown"
 }
 
+get_manager_version() {
+    printf '%s\n' "$SYNC_SKILLS_MANAGER_VERSION"
+}
+
 get_installed_version() {
     local metadata_file
     metadata_file="$(skill_manager_metadata_file)"
@@ -738,6 +749,38 @@ get_installed_version() {
     echo "unknown"
 }
 
+sync_script_version_from_file() {
+    local script_path=${1:-"$CODEX_SOURCE/sync-skills.sh"}
+    local version_line
+
+    if [[ ! -f "$script_path" ]]; then
+        printf 'missing\n'
+        return 0
+    fi
+
+    version_line="$(grep -E '^SYNC_SKILLS_MANAGER_VERSION=' "$script_path" | head -n 1 || true)"
+    if [[ -z "$version_line" ]]; then
+        printf 'unknown\n'
+        return 0
+    fi
+
+    version_line="${version_line#*=}"
+    version_line="${version_line#\"}"
+    version_line="${version_line%\"}"
+    printf '%s\n' "$version_line"
+}
+
+sync_script_checksum_from_file() {
+    local script_path=${1:-"$CODEX_SOURCE/sync-skills.sh"}
+
+    if [[ ! -f "$script_path" ]]; then
+        printf 'missing\n'
+        return 0
+    fi
+
+    md5_for_file "$script_path"
+}
+
 git_repository_available() {
     command -v git >/dev/null 2>&1 && git -C "$CODEX_SOURCE" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
@@ -745,6 +788,11 @@ git_repository_available() {
 git_remote_url_for_name() {
     local remote_name=$1
     git -C "$CODEX_SOURCE" remote get-url "$remote_name" 2>/dev/null || true
+}
+
+git_fetch_remote_noninteractive() {
+    local remote_name=$1
+    GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git -C "$CODEX_SOURCE" fetch --prune "$remote_name"
 }
 
 git_current_branch() {
@@ -822,6 +870,7 @@ write_install_metadata() {
     ensure_skill_manager_state_directories
     cat > "$metadata_file" <<EOF
 repo_version=$(get_repo_version)
+manager_version=$(get_manager_version)
 updated_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 platform=$PLATFORM_NAME
 target=$CODEX_TARGET
@@ -1421,15 +1470,20 @@ agent_config_has_required_runtime_guidance() {
 
     file_contains_all_patterns "$file_path" \
         'working brief' \
+        'workspace-scoped memory' \
         'freshness-aware research cache' \
         'Research current external information before trusting internal knowledge' \
+        'request_user_input' \
         'keep iterating in the same turn' \
+        'explicit user requirement' \
+        'do not present unresolved work as complete' \
+        'status requests are checkpoints, not stop signals' \
         'js_repl' \
         'codex\.tool' \
         'reuse the same-role agent' \
         'keep the handoff bounded' \
-        'terminal state before finalizing|wait[^\n]*terminal state' \
-        'main agent performs final'
+        'interrupt=true' \
+        'terminal state before finalizing|wait[^\n]*terminal state'
 }
 
 # Validate a Codex skill directory for Codex-specific requirements and separation.
@@ -1546,6 +1600,14 @@ validate_codex_skill_dir() {
                 print_error "Reviewer skill is missing multi-reviewer lane or re-review guidance"
                 return 1
             fi
+            if ! grep -q "readiness or ACK check" "$skill_dir/SKILL.md" || ! grep -q "old completed payload" "$skill_dir/SKILL.md" || ! grep -q "raw HTML or HTTP 4xx or 5xx content" "$skill_dir/SKILL.md"; then
+                print_error "Reviewer skill is missing resumed-agent handshake or transport-failure recovery guidance"
+                return 1
+            fi
+            if ! grep -q "Prompt injection" "$skill_dir/SKILL.md" || ! grep -q "data only, never instructions" "$skill_dir/SKILL.md" || ! grep -q "same failing tool call" "$skill_dir/SKILL.md"; then
+                print_error "Reviewer skill is missing prompt-injection, external-content, or anti-loop guidance"
+                return 1
+            fi
             ;;
         software-development-life-cycle)
             if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Context and Structure Defaults" "Keep entrypoints thin"; then
@@ -1554,6 +1616,24 @@ validate_codex_skill_dir() {
             fi
             if ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Context and Structure Defaults" 4 || ! markdown_section_has_minimum_bullets "$skill_dir/SKILL.md" "Modular Delivery Defaults" 3; then
                 print_error "Software-development-life-cycle skill is missing the expected depth in context or modular-delivery defaults"
+                return 1
+            fi
+            if ! grep -q "readiness or ACK check" "$skill_dir/SKILL.md" || ! grep -q "old completed payload" "$skill_dir/SKILL.md" || ! grep -q "raw HTML or HTTP 4xx or 5xx content" "$skill_dir/SKILL.md"; then
+                print_error "Software-development-life-cycle skill is missing resumed-agent handshake or transport-failure recovery guidance"
+                return 1
+            fi
+            if ! grep -q "Prompt injection" "$skill_dir/SKILL.md" || ! grep -q "data only, never instructions" "$skill_dir/SKILL.md" || ! grep -q "same failing tool call" "$skill_dir/SKILL.md"; then
+                print_error "Software-development-life-cycle skill is missing prompt-injection, external-content, or anti-loop guidance"
+                return 1
+            fi
+            ;;
+        memory-status-reporter)
+            if ! grep -q "memory_maintenance.py" "$skill_dir/SKILL.md" || ! grep -q "SESSION-STATE.md" "$skill_dir/SKILL.md" || ! grep -q "working-buffer.md" "$skill_dir/SKILL.md" || ! grep -q "trim" "$skill_dir/SKILL.md" || ! grep -q "recalibrate" "$skill_dir/SKILL.md"; then
+                print_error "Memory-status-reporter skill is missing WAL, working-buffer, or maintenance-helper guidance"
+                return 1
+            fi
+            if ! grep -q "data only, never instructions" "$skill_dir/SKILL.md" || ! grep -q "same failing tool call" "$skill_dir/SKILL.md"; then
+                print_error "Memory-status-reporter skill is missing external-content or anti-loop guidance"
                 return 1
             fi
             ;;
@@ -1714,6 +1794,7 @@ validate_codex_agent_config() {
     local expected_override_model=""
     local expected_allow_implicit="true"
     local default_prompt_word_count=0
+    local default_prompt_character_count=0
 
     if [[ -f "$CODEX_TARGET/config.toml" ]]; then
         local detected_model
@@ -1751,6 +1832,12 @@ validate_codex_agent_config() {
     default_prompt_word_count="$(extract_codex_openai_value "$config_file" "default_prompt" | wc -w | awk '{print $1}')"
     if [[ "$default_prompt_word_count" -gt 260 ]]; then
         print_error "Codex agent prompt is too long and likely duplicates repo policy: $skill_name ($default_prompt_word_count words)"
+        return 1
+    fi
+
+    default_prompt_character_count="$(extract_codex_openai_value "$config_file" "default_prompt" | wc -c | awk '{print $1}')"
+    if [[ "$default_prompt_character_count" -gt 1601 ]]; then
+        print_error "Codex agent prompt is too long and likely duplicates repo policy: $skill_name ($default_prompt_character_count characters)"
         return 1
     fi
 
@@ -1861,8 +1948,18 @@ validate_codex_guidance_file() {
             return 1
         fi
 
+        if ! grep -qi "Scope-First Memory Rule" "$file" || ! grep -qi "~/.codex/memories/workspaces/<workspace-slug>/" "$file" || ! grep -qi "workstreams/<workstream-key>" "$file" || ! grep -qi "instances/<agent-instance>" "$file" || ! grep -qi "~/.codex/memories/agents/<role>/<workspace-slug>/" "$file"; then
+            print_error "Missing scoped-memory lookup policy in AGENTS.md"
+            return 1
+        fi
+
         if ! grep -qi "Reinforcement Memory (Reward/Penalty Loop)" "$file" || ! grep -qi "Research Cache Requirement" "$file" || ! grep -qi "Freshness Rule" "$file"; then
             print_error "Missing reinforcement-memory, research-cache, or freshness policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "Stale Memory Handling" "$file"; then
+            print_error "Missing stale-memory handling policy in AGENTS.md"
             return 1
         fi
 
@@ -1878,6 +1975,11 @@ validate_codex_guidance_file() {
 
         if ! grep -qi "maintain a lightweight per-project spawned-agent list" "$file"; then
             print_error "Missing spawned-agent registry policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "interrupt=true" "$file"; then
+            print_error "Missing no-interrupt-rush policy in AGENTS.md"
             return 1
         fi
 
@@ -1906,8 +2008,22 @@ validate_codex_guidance_file() {
             return 1
         fi
 
+        if ! grep -qi "readiness or ACK check" "$file" || ! grep -qi "old completed payload" "$file" || ! grep -qi "raw HTML or HTTP 4xx or 5xx content" "$file"; then
+            print_error "Missing resumed-agent handshake or transport-failure recovery policy in AGENTS.md"
+            return 1
+        fi
+
         if ! grep -qi "Do not pin a specific model inside ordinary root Codex" "$file" || ! grep -qi "Home agent TOMLs should inherit model and reasoning from the main config" "$file" || ! grep -qi "cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly" "$file"; then
             print_error "Missing root model-inheritance or runtime model-selection boundary policy in AGENTS.md"
+            return 1
+        fi
+
+        if ! grep -qi "every explicit user requirement" "$file" || ! grep -qi "Do not present unresolved work as complete" "$file" || ! grep -qi "does not suspend execution when fixable in-scope work remains" "$file"; then
+            print_error "Missing completion reconciliation or no-soft-stop enforcement in AGENTS.md"
+            return 1
+        fi
+        if ! grep -qi "WAL Protocol" "$file" || ! grep -qi "SESSION-STATE.md" "$file" || ! grep -qi "working-buffer.md" "$file" || ! grep -qi "Trim Protocol" "$file" || ! grep -qi "recalibrate" "$file" || ! grep -qi "Prompt Injection Defense" "$file" || ! grep -qi "External Content Security" "$file" || ! grep -qi "Cross-Platform Script Portability" "$file" || ! grep -qi "Parallel Main-Agent Throughput" "$file"; then
+            print_error "Missing WAL, memory-maintenance, security-boundary, or cross-platform policy in AGENTS.md"
             return 1
         fi
     fi
@@ -1917,11 +2033,19 @@ validate_codex_guidance_file() {
             print_error "Missing research-cache, GitHub update, or reinforcement-memory workflow in README.md"
             return 1
         fi
+        if ! grep -qi "resolve_memory_scope.py" "$file" || ! grep -qi "research_cache.py" "$file" || ! grep -qi "workspace memory" "$file" || ! grep -qi "workstreams/<workstream-key>" "$file" || ! grep -qi "instances/<agent-instance>" "$file" || ! grep -qi "archive-stale" "$file"; then
+            print_error "Missing scoped-memory or research-cache helper workflow in README.md"
+            return 1
+        fi
+        if ! grep -qi "sync-skills.ps1" "$file" || ! grep -qi "delegates to `sync-skills.sh`" "$file" || ! grep -qi "Git Bash on Windows" "$file" || ! grep -qi "runtime-guardrails-and-memory-protocols.md" "$file"; then
+            print_error "Missing Windows wrapper, Git Bash, or runtime-guardrails documentation in README.md"
+            return 1
+        fi
     fi
 
     if [[ "$(basename "$file")" == "00-skill-routing-and-escalation.md" ]]; then
-        if ! grep -qi "Reuse Fresh Research First" "$file" || ! grep -qi "Fix The Next Bug Too" "$file"; then
-            print_error "Missing cache-first or autonomy routing defaults in 00-skill-routing-and-escalation.md"
+        if ! grep -qi "Reuse Fresh Research First" "$file" || ! grep -qi "Fix The Next Bug Too" "$file" || ! grep -qi "Requirement Reconciliation Before Close" "$file" || ! grep -qi "Status Requests Do Not End The Job" "$file" || ! grep -qi "Write Corrections Before Responding" "$file" || ! grep -qi "Resolve workspace-scoped memory first" "$file" || ! grep -qi "agent-instance lane" "$file"; then
+            print_error "Missing cache-first, no-soft-stop, WAL, or autonomy routing defaults in 00-skill-routing-and-escalation.md"
             return 1
         fi
     fi
@@ -2027,7 +2151,11 @@ run_repo_contract_tests() {
     ensure_python_launcher || return 1
 
     run_python -m py_compile \
+        "$CODEX_SOURCE/memory-status-reporter/scripts/memory_store.py" \
+        "$CODEX_SOURCE/memory-status-reporter/scripts/resolve_memory_scope.py" \
+        "$CODEX_SOURCE/memory-status-reporter/scripts/memory_maintenance.py" \
         "$CODEX_SOURCE/memory-status-reporter/scripts/memory_status_report.py" \
+        "$CODEX_SOURCE/memory-status-reporter/scripts/research_cache.py" \
         "$CODEX_SOURCE/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py" \
         "$CODEX_SOURCE/tests/test_skill_pack_contracts.py" || return 1
 
@@ -2241,6 +2369,15 @@ PY
     return 0
 }
 
+ensure_memory_hygiene_layout() {
+    mkdir -p \
+        "$CODEX_TARGET/memories/workspaces" \
+        "$CODEX_TARGET/memories/agents" \
+        "$CODEX_TARGET/memories/research_cache" \
+        "$CODEX_TARGET/memories/archive" \
+        "$CODEX_TARGET/memories/reports"
+}
+
 sync_root_guidance_files() {
     if [[ -f "$CODEX_SOURCE/AGENTS.md" ]]; then
         cp "$CODEX_SOURCE/AGENTS.md" "$CODEX_TARGET/AGENTS.md"
@@ -2300,11 +2437,14 @@ sync_codex() {
     mkdir -p "$CODEX_TARGET"
     mkdir -p "$CODEX_TARGET/skills"
     mkdir -p "$CODEX_TARGET/agents"
+    mkdir -p "$CODEX_TARGET/memories"
 
     run_task_line "validate docs" validate_codex_repo_docs || {
         print_error "Codex guidance validation failed, aborting Codex sync"
         return 1
     }
+
+    run_task_line "sync memory layout" ensure_memory_hygiene_layout || return 1
 
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
@@ -2351,6 +2491,8 @@ sync_codex_delta_update() {
     if [[ "$root_files_changed" == "true" ]]; then
         sync_root_guidance_files
     fi
+
+    ensure_memory_hygiene_layout
 
     if [[ ${#removed_skills[@]} -gt 0 ]]; then
         print_info "Removing repo-managed skills no longer present in source: ${removed_skills[*]}"
@@ -2679,74 +2821,7 @@ remove_skill_pack() {
     print_success "Removed repo-managed Codex skill pack files from $CODEX_TARGET"
 }
 
-install_codex() {
-    run_task_line "validate" validate_all || return 1
-    run_task_line "install to $CODEX_TARGET" sync_codex
-}
-
-update_codex_from_github() {
-    local update_ref
-    local remote_name
-    local remote_branch
-    local relationship
-    local remote_url
-
-    if ! ensure_sync_runtime_prerequisites; then
-        print_error "Runtime prerequisites failed, aborting GitHub update"
-        return 1
-    fi
-
-    if ! git_repository_available; then
-        print_error "GitHub update requires $CODEX_SOURCE to be a Git repository"
-        return 1
-    fi
-
-    if ! git_worktree_is_clean; then
-        print_error "Repository has local changes. Commit, stash, or discard them before running github-update."
-        return 1
-    fi
-
-    update_ref="$(git_resolve_update_source_ref)" || {
-        print_error "No upstream tracking branch or origin default branch was found. Configure a remote branch before running github-update."
-        return 1
-    }
-
-    remote_name="${update_ref%%/*}"
-    remote_branch="${update_ref#*/}"
-    remote_url="$(git_remote_url_for_name "$remote_name")"
-    if [[ -z "$remote_url" ]]; then
-        print_error "No remote URL is configured for $remote_name in $CODEX_SOURCE"
-        return 1
-    fi
-
-    run_task_line "fetch $remote_name" git -C "$CODEX_SOURCE" fetch --prune "$remote_name" || return 1
-
-    relationship="$(git_update_relationship "$update_ref")"
-    case "$relationship" in
-        up_to_date)
-            print_success "Repository already matches $update_ref"
-            ;;
-        behind)
-            run_task_line "pull $update_ref" git -C "$CODEX_SOURCE" pull --ff-only "$remote_name" "$remote_branch" || return 1
-            ;;
-        ahead)
-            print_error "Repository is ahead of $update_ref. Use ./sync-skills.sh update for local-only sync, or push/reset before running github-update."
-            return 1
-            ;;
-        diverged)
-            print_error "Repository diverged from $update_ref. Reconcile the branch before running github-update."
-            return 1
-            ;;
-        *)
-            print_error "Unable to compare the repo with $update_ref after fetch"
-            return 1
-            ;;
-    esac
-
-    update_codex
-}
-
-update_codex() {
+apply_repo_managed_changes() {
     local changed_skills=()
     local removed_skills=()
     local skill_name
@@ -2758,12 +2833,10 @@ update_codex() {
     fi
 
     if ! pack_is_installed; then
-        print_info "No installed Codex skill pack was found in $CODEX_TARGET; running install instead of delta update"
-        install_codex
+        print_info "No installed Codex skill pack was found in $CODEX_TARGET; running install instead of a delta refresh"
+        sync_codex
         return $?
     fi
-
-    run_task_line "validate" validate_all || return 1
 
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
@@ -2787,9 +2860,107 @@ update_codex() {
         return 0
     fi
 
-    print_info "update plan: repo=$(get_repo_version) installed=$(get_installed_version) changed=${#changed_skills[@]} removed=${#removed_skills[@]} root_refresh=$root_files_changed"
+    print_info "update plan: manager=$(get_manager_version) repo=$(get_repo_version) installed=$(get_installed_version) changed=${#changed_skills[@]} removed=${#removed_skills[@]} root_refresh=$root_files_changed"
     sync_codex_delta_update "$root_files_changed" "${changed_skills[@]}" || return 1
     refresh_bootstrap_entry_script_from_repo
+}
+
+install_codex() {
+    run_task_line "validate" validate_all || return 1
+
+    if pack_is_installed; then
+        print_info "Skill pack already exists in $CODEX_TARGET; install will refresh only the changed repo-managed files, including AGENTS.md and root routing when needed."
+        run_task_line "sync changes to $CODEX_TARGET" apply_repo_managed_changes
+        return $?
+    fi
+
+    run_task_line "install to $CODEX_TARGET" sync_codex
+}
+
+refresh_repo_before_update_if_possible() {
+    local update_ref
+    local remote_name
+    local remote_branch
+    local relationship
+    local remote_url
+    local previous_script_checksum
+    local previous_manager_version
+    local current_script_checksum
+    local current_manager_version
+
+    if ! ensure_sync_runtime_prerequisites; then
+        print_error "Runtime prerequisites failed, aborting update"
+        return 1
+    fi
+
+    if ! git_repository_available; then
+        print_info "Git is unavailable for remote manager checks; using the current local repo state."
+        return 0
+    fi
+
+    update_ref="$(git_resolve_update_source_ref || true)"
+    if [[ -z "$update_ref" ]]; then
+        print_info "No tracked remote update source was found; using the current local repo state."
+        return 0
+    fi
+
+    remote_name="${update_ref%%/*}"
+    remote_branch="${update_ref#*/}"
+    remote_url="$(git_remote_url_for_name "$remote_name")"
+    if [[ -z "$remote_url" ]]; then
+        print_warning "No remote URL is configured for $remote_name in $CODEX_SOURCE; using the current local repo state."
+        return 0
+    fi
+
+    if ! run_task_line "fetch $remote_name" git_fetch_remote_noninteractive "$remote_name"; then
+        print_warning "Unable to refresh $update_ref; using the current local repo state."
+        return 0
+    fi
+
+    if ! git_worktree_is_clean; then
+        print_warning "Repository has local changes, so remote manager update is skipped. The current local repo state will still be synced into Codex home."
+        return 0
+    fi
+
+    relationship="$(git_update_relationship "$update_ref")"
+    case "$relationship" in
+        up_to_date)
+            print_success "Repository already matches $update_ref"
+            ;;
+        behind)
+            previous_script_checksum="$(sync_script_checksum_from_file "$CODEX_SOURCE/sync-skills.sh")"
+            previous_manager_version="$(sync_script_version_from_file "$CODEX_SOURCE/sync-skills.sh")"
+            run_task_line "pull $update_ref" git -C "$CODEX_SOURCE" pull --ff-only "$remote_name" "$remote_branch" || return 1
+            current_script_checksum="$(sync_script_checksum_from_file "$CODEX_SOURCE/sync-skills.sh")"
+            current_manager_version="$(sync_script_version_from_file "$CODEX_SOURCE/sync-skills.sh")"
+            if [[ "$previous_script_checksum" != "$current_script_checksum" ]]; then
+                print_info "sync-skills.sh changed during the repo update (${previous_manager_version} -> ${current_manager_version}); restarting into the refreshed manager before continuing."
+                refresh_bootstrap_entry_script_from_repo
+                exec bash "$CODEX_SOURCE/sync-skills.sh" "$SYNC_SKILLS_INTERNAL_UPDATE_RESUME_COMMAND"
+            fi
+            ;;
+        ahead)
+            print_info "Local repository is ahead of $update_ref; syncing the newer local repo state into Codex home."
+            ;;
+        diverged)
+            print_warning "Repository diverged from $update_ref; skipping remote manager update and syncing the current local repo state instead."
+            ;;
+        *)
+            print_warning "Unable to compare the repo with $update_ref after fetch; syncing the current local repo state instead."
+            ;;
+    esac
+
+    return 0
+}
+
+update_codex() {
+    refresh_repo_before_update_if_possible || return 1
+    run_task_line "validate" validate_all || return 1
+    run_task_line "apply repo updates" apply_repo_managed_changes
+}
+
+update_codex_from_github() {
+    update_codex
 }
 
 choose_installed_skill_interactively() {
@@ -2827,87 +2998,32 @@ prompt_yes_no() {
 
 run_interactive_menu() {
     local menu_choice
-    local selected_skill
-    local remove_mode
-    local verify_mode
 
     while true; do
         echo ""
         print_header "Codex Skill Manager"
-        print_menu_option "i"  "install"
-        print_menu_option "s"  "sync"
-        print_menu_option "u"  "update"
-        print_menu_option "g"  "github-update"
-        print_menu_option "r"  "remove"
-        print_menu_option "v"  "verify"
-        print_menu_option "st" "status"
-        print_menu_option "q"  "quit"
+        print_menu_option "1" "Install - install the skill pack, or refresh changed repo-managed files when it is already installed"
+        print_menu_option "2" "Update  - check for manager/repo updates first, restart into the new script if needed, then update installed skills"
+        print_menu_option "3" "Status  - check manager version, self-update state, skill-pack update state, and wiring health"
+        print_menu_option "4" "Quit"
         echo ""
         read -r -p "select: " menu_choice
 
         case "$menu_choice" in
             i|install|1)
-                if prompt_yes_no "Install the repo skill pack into $CODEX_TARGET?"; then
+                if prompt_yes_no "Install the repo skill pack into $CODEX_TARGET? If it is already installed, only changed repo-managed files will be refreshed."; then
                     install_codex
                 fi
                 ;;
-            s|sync|2)
-                if prompt_yes_no "Force-sync the repo skill pack into $CODEX_TARGET?"; then
-                    sync_codex
-                fi
-                ;;
-            u|update|3)
-                update_codex
-                ;;
-            g|github-update|upgrade|8)
-                if prompt_yes_no "Fetch the latest repo changes from GitHub and sync them into $CODEX_TARGET?"; then
+            u|update|2)
+                if prompt_yes_no "Check for manager updates first, restart into the new script if needed, and then update the installed skill pack in $CODEX_TARGET?"; then
                     update_codex_from_github
                 fi
                 ;;
-            r|remove|4)
-                print_menu_option "1" "remove one installed skill"
-                print_menu_option "2" "remove full skill pack"
-                print_menu_option "x" "cancel"
-                read -r -p "remove> " remove_mode
-                case "$remove_mode" in
-                    1)
-                        selected_skill="$(choose_installed_skill_interactively)" || continue
-                        if prompt_yes_no "Remove $selected_skill from $CODEX_TARGET?"; then
-                            remove_skill_installation "$selected_skill"
-                        fi
-                        ;;
-                    2)
-                        if prompt_yes_no "Remove the full repo-managed skill pack from $CODEX_TARGET?" "n"; then
-                            remove_skill_pack
-                        fi
-                        ;;
-                    *)
-                        print_info "Remove cancelled"
-                        ;;
-                esac
-                ;;
-            v|verify|5)
-                print_menu_option "1" "verify full skill pack"
-                print_menu_option "2" "verify one skill"
-                print_menu_option "x" "cancel"
-                read -r -p "verify> " verify_mode
-                case "$verify_mode" in
-                    1)
-                        verify_pack_checksums
-                        ;;
-                    2)
-                        selected_skill="$(choose_installed_skill_interactively)" || continue
-                        run_task_line "verify $selected_skill" verify_skill_checksum "$selected_skill"
-                        ;;
-                    *)
-                        print_info "Verification cancelled"
-                        ;;
-                esac
-                ;;
-            st|status|6)
+            st|status|3)
                 show_status
                 ;;
-            q|quit|7)
+            q|quit|4)
                 print_success "Goodbye"
                 return 0
                 ;;
@@ -2919,16 +3035,108 @@ run_interactive_menu() {
 }
 
 # Function to show status
+summarize_self_update_status() {
+    local update_ref
+    local relationship
+    local dirty_note=""
+
+    if ! git_repository_available; then
+        printf 'local repo only (git unavailable)\n'
+        return 0
+    fi
+
+    update_ref="$(git_resolve_update_source_ref || true)"
+    if [[ -z "$update_ref" ]]; then
+        printf 'local repo only (no tracked remote update source)\n'
+        return 0
+    fi
+
+    if ! git_worktree_is_clean; then
+        dirty_note="; local changes present"
+    fi
+
+    relationship="$(git_update_relationship "$update_ref")"
+    case "$relationship" in
+        up_to_date)
+            printf 'up to date with %s (cached remote state)%s\n' "$update_ref" "$dirty_note"
+            ;;
+        behind)
+            printf 'update available from %s (cached remote state)%s\n' "$update_ref" "$dirty_note"
+            ;;
+        ahead)
+            printf 'local repo is ahead of %s (cached remote state)%s\n' "$update_ref" "$dirty_note"
+            ;;
+        diverged)
+            printf 'local repo diverged from %s (cached remote state)%s\n' "$update_ref" "$dirty_note"
+            ;;
+        *)
+            printf 'unknown for %s (cached remote state)%s\n' "$update_ref" "$dirty_note"
+            ;;
+    esac
+}
+
+summarize_skill_pack_update_status() {
+    local changed_skills=()
+    local removed_skills=()
+    local detail_parts=()
+    local skill_name
+
+    if ! pack_is_installed; then
+        printf 'not installed\n'
+        return 0
+    fi
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        changed_skills+=("$skill_name")
+    done < <(collect_changed_skills_parallel)
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        removed_skills+=("$skill_name")
+    done < <(list_removed_repo_managed_skill_names)
+
+    if ! core_files_need_update && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]]; then
+        printf 'up to date\n'
+        return 0
+    fi
+
+    if core_files_need_update; then
+        detail_parts+=("root guidance changed")
+    fi
+
+    if [[ ${#changed_skills[@]} -gt 0 ]]; then
+        detail_parts+=("${#changed_skills[@]} skill change(s)")
+    fi
+
+    if [[ ${#removed_skills[@]} -gt 0 ]]; then
+        detail_parts+=("${#removed_skills[@]} retired skill(s)")
+    fi
+
+    printf 'update available (%s)\n' "$(IFS=", "; echo "${detail_parts[*]}")"
+}
+
 show_status() {
-    print_info "Skill Sync Status"
+    local self_update_status
+    local skill_pack_update_status
+
+    self_update_status="$(summarize_self_update_status)"
+    skill_pack_update_status="$(summarize_skill_pack_update_status)"
+
+    print_info "Codex Skill Pack Status"
+    echo ""
+    print_info "Summary:"
+    print_key_value "Manager version:" "$(get_manager_version)"
+    print_key_value "Repo version:" "$(get_repo_version)"
+    print_key_value "Installed version:" "$(get_installed_version)"
+    print_key_value "Self update status:" "$self_update_status"
+    print_key_value "Skill pack update status:" "$skill_pack_update_status"
     echo ""
 
     print_info "Codex Skills:"
     echo "  Source: $CODEX_SOURCE"
     echo "  Target: $CODEX_TARGET/skills"
     echo "  Platform: $PLATFORM_NAME"
-    echo "  Repo version: $(get_repo_version)"
-    echo "  Installed version: $(get_installed_version)"
     if git_repository_available; then
         local git_remote_name
         local git_remote_url
@@ -2998,6 +3206,12 @@ show_status() {
         echo "  memory-status-reporter config: missing"
     fi
 
+    if [[ -d "$CODEX_TARGET/memories/workspaces" ]] && [[ -d "$CODEX_TARGET/memories/agents" ]] && [[ -d "$CODEX_TARGET/memories/research_cache" ]] && [[ -d "$CODEX_TARGET/memories/archive" ]]; then
+        echo "  memory scope layout: synced"
+    else
+        echo "  memory scope layout: missing"
+    fi
+
     if [[ $codex_home_agent_total -gt 0 ]]; then
         if [[ ${#codex_home_agent_overrides[@]} -gt 0 ]]; then
             echo "  agent inheritance: $codex_home_agent_inheriting/$codex_home_agent_total (explicit overrides: ${codex_home_agent_overrides[*]})"
@@ -3016,23 +3230,24 @@ show_status() {
 
 # Main script
 show_usage() {
-    echo "Usage: $0 {menu|install|i|sync|s|codex|update|u|github-update|gu|upgrade|remove|uninstall|verify|v|validate|status|st|all}"
+    echo "Usage: $0 {menu|install|i|update|u|status|st|validate|verify|remove|all}"
     echo ""
     echo "Commands:"
-    echo "  menu              - Open the interactive installer and management menu"
-    echo "  install | i       - Validate, sync, and verify the skill pack"
-    echo "  sync | s | codex  - Force-sync the skill pack and verify the result"
-    echo "  update | u        - Refresh changed repo-managed files from the current local clone"
-    echo "  github-update | gu | upgrade - Fetch the latest repo changes, fast-forward the clone, then sync changed files"
-    echo "  remove            - Remove the full repo-managed skill pack"
+    echo "  menu              - Open the simple interactive manager with Install, Update, Status, and Quit"
+    echo "  install | i       - Install the skill pack, or refresh changed repo-managed files if it is already installed"
+    echo "  update | u        - Check for repo/manager updates first, restart into the refreshed script if needed, then update installed skills"
+    echo "  status | st       - Show manager version, self-update state, skill-pack update state, and checksum drift"
+    echo "  validate          - Advanced: validate all skills without syncing"
+    echo "  verify | v        - Advanced: verify the installed skill pack with MD5 checksums"
+    echo "  verify <skill>    - Advanced: verify one installed skill with MD5 checksums"
+    echo "  remove            - Advanced: remove the full repo-managed skill pack"
+    echo "  remove <skill>    - Advanced: remove one installed skill by name"
     echo "  uninstall         - Alias for remove"
-    echo "  remove <skill>    - Remove one installed skill by name"
-    echo "  uninstall <skill> - Alias for remove <skill>"
-    echo "  verify | v        - Verify the installed skill pack with MD5 checksums"
-    echo "  verify <skill>    - Verify one installed skill with MD5 checksums"
-    echo "  validate          - Validate all skills without syncing"
-    echo "  status | st       - Show sync status, versions, and checksum drift"
-    echo "  all               - Validate and sync Codex (default)"
+    echo "  all               - Validate and install"
+    echo ""
+    echo "Legacy aliases:"
+    echo "  sync | s | codex  - Alias for install"
+    echo "  github-update | gu | upgrade - Alias for update"
     echo ""
     echo "Environment:"
     echo "  CODEX_TARGET_OVERRIDE=/custom/path/.codex  Override the Codex home target"
@@ -3052,13 +3267,20 @@ main() {
             install_codex
             ;;
         sync|s|codex)
-            sync_codex
+            install_codex
             ;;
         update|u)
             update_codex
             ;;
         github-update|gu|upgrade)
             update_codex_from_github
+            ;;
+        "$SYNC_SKILLS_INTERNAL_UPDATE_RESUME_COMMAND")
+            run_task_line "validate" validate_all || {
+                print_error "Validation failed after the manager restarted"
+                exit 1
+            }
+            run_task_line "apply repo updates" apply_repo_managed_changes
             ;;
         remove|uninstall)
             if [[ -n "${2:-}" ]]; then
@@ -3081,11 +3303,7 @@ main() {
             show_status
             ;;
         ""|all)
-            run_task_line "validate" validate_all || {
-                print_error "Validation failed, skipping sync"
-                exit 1
-            }
-            run_task_line "sync" sync_codex
+            install_codex
             ;;
         *)
             show_usage

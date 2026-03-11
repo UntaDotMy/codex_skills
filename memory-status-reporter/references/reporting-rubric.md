@@ -6,11 +6,19 @@ This rubric defines the memory-health metrics used by `scripts/memory_status_rep
 
 ## Source Priority
 
-1. `rollout_summaries/*.md`
-2. `MEMORY.md`
-3. `memory_summary.md`
-4. rewarded-pattern, penalty-pattern, or research-cache sections captured inside those artifacts
-5. `raw_memories.md` only when the higher-priority sources are too thin
+1. Workspace-scoped, workstream-scoped, role-scoped, and agent-instance-scoped memory files for the active lane
+2. The shared workspace research cache for the active workspace and workstream
+3. Matching `rollout_summaries/*.md` filtered by structured metadata for the same `cwd`, matching `git_branch` or workstream key, and optional `agent_instance`
+4. `MEMORY.md`
+5. `memory_summary.md`
+6. Archive lanes or `raw_memories.md` only when the higher-priority sources are too thin
+
+## Rollout Evidence Rules
+
+- Treat `rollout_summaries/*.md` as summary-layer evidence, not as a full transcript dump.
+- Match rollout summaries by structured metadata fields such as `cwd:`, `git_branch:`, and `agent_instance:` instead of arbitrary body text.
+- Use each summary's `rollout_path` JSONL only when the summary-layer evidence is too coarse and exact session evidence is required.
+- Prefer the scoped memory lanes first; rollout summaries should enrich or confirm that scoped context rather than replace it.
 
 ## Status Labels
 
@@ -22,7 +30,7 @@ This rubric defines the memory-health metrics used by `scripts/memory_status_rep
 ## Metric Definitions
 
 - **Task completion**: successful task outcomes divided by total task outcomes in the window
-- **Learning capture**: rollout summaries with reusable-knowledge bullets divided by rollout summaries in the window
+- **Learning capture**: matching rollout summaries in the reporting window with reusable-knowledge bullets, plus scoped-lane learnings that were active for that same window
 - **Mistake resolution**: resolved mistakes divided by total mistakes in the window
 - **Reward strength**: rewarded patterns captured in the window plus reusable knowledge that became durable enough to prefer next time
 - **Penalty pressure**: repeated open or unclear mistakes, repeated tool mistakes, and stale findings that future work should avoid or refresh
@@ -40,9 +48,9 @@ This rubric defines the memory-health metrics used by `scripts/memory_status_rep
 
 ## Confidence
 
-- **High**: at least two rollout summaries in the window plus durable memory context
-- **Medium**: one rollout summary in the window or strong durable memory context
-- **Low**: no rollout summaries in the window and only fallback context remains
+- **High**: scoped lane files plus at least two matching rollout summaries in the window, or strong scoped memory plus durable memory context
+- **Medium**: one matching rollout summary in the window or strong scoped memory context
+- **Low**: no matching rollout summaries in the window and only fallback context remains
 
 ## Honesty Rule
 
