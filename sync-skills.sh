@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOTSTRAP_DEFAULT_REPOSITORY_URL="https://github.com/UntaDotMy/codex_skills.git"
 BOOTSTRAP_DEFAULT_REPOSITORY_BRANCH="main"
 CODEX_SOURCE="$SCRIPT_DIR"
-SYNC_SKILLS_MANAGER_VERSION="2026.03.11.1"
+SYNC_SKILLS_MANAGER_VERSION="2026.03.12.1"
 SYNC_SKILLS_INTERNAL_UPDATE_RESUME_COMMAND="__resume-after-self-update"
 
 bootstrap_repository_layout_is_complete() {
@@ -781,6 +781,60 @@ skill_manager_local_home_agent_override_file() {
     printf '%s/local-home-agent-overrides.json\n' "$(skill_manager_state_directory)"
 }
 
+seed_default_local_home_agent_overrides() {
+    local override_file
+    local seed_result
+
+    override_file="$(skill_manager_local_home_agent_override_file)"
+    mkdir -p "$(skill_manager_state_directory)"
+
+    seed_result="$(run_python - "$override_file" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+override_file = Path(sys.argv[1])
+if override_file.exists():
+    try:
+        payload = json.loads(override_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Invalid local home-agent override file {override_file}: {exc}")
+    if not isinstance(payload, dict):
+        raise SystemExit(f"Local home-agent override file must contain a JSON object: {override_file}")
+else:
+    payload = {}
+
+agent_payload = payload.get("memory-status-reporter", {})
+if agent_payload is None:
+    agent_payload = {}
+if not isinstance(agent_payload, dict):
+    raise SystemExit(
+        f"Local home-agent override entry for memory-status-reporter must be a JSON object: {override_file}"
+    )
+
+changed = False
+if agent_payload.get("model") != "gpt-5.3-codex-spark":
+    agent_payload["model"] = "gpt-5.3-codex-spark"
+    changed = True
+if agent_payload.get("reasoning_effort") != "high":
+    agent_payload["reasoning_effort"] = "high"
+    changed = True
+
+payload["memory-status-reporter"] = agent_payload
+
+if changed or not override_file.exists():
+    override_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print("updated")
+else:
+    print("unchanged")
+PY
+)" || return 1
+
+    if [[ "$seed_result" == "updated" ]]; then
+        print_success "Seeded local home-agent overrides for memory-status-reporter"
+    fi
+}
+
 read_local_home_agent_override_value() {
     local home_agent_name=$1
     local field_name=$2
@@ -830,6 +884,7 @@ PY
 
 pack_has_repo_managed_files() {
     local installed_skill_name
+    local installed_agent_profile_name
 
     if [[ -f "$CODEX_TARGET/AGENTS.md" ]] || [[ -f "$CODEX_TARGET/00-skill-routing-and-escalation.md" ]]; then
         return 0
@@ -838,6 +893,13 @@ pack_has_repo_managed_files() {
     if [[ -f "$CODEX_TARGET/agents/memory-status-reporter.toml" ]] || config_has_any_memory_status_lines "$CODEX_TARGET/config.toml"; then
         return 0
     fi
+
+    while IFS= read -r installed_agent_profile_name; do
+        [[ -n "$installed_agent_profile_name" ]] || continue
+        if [[ -f "$CODEX_TARGET/agent-profiles/$installed_agent_profile_name.toml" ]]; then
+            return 0
+        fi
+    done < <(list_repo_agent_profile_names)
 
     while IFS= read -r installed_skill_name; do
         [[ -n "$installed_skill_name" ]] || continue
@@ -850,7 +912,7 @@ pack_has_repo_managed_files() {
 }
 
 pack_is_installed() {
-    if [[ -f "$(skill_manager_metadata_file)" ]] || [[ -f "$(managed_skill_inventory_file)" ]] || [[ -f "$(managed_home_agent_inventory_file)" ]]; then
+    if [[ -f "$(skill_manager_metadata_file)" ]] || [[ -f "$(managed_skill_inventory_file)" ]] || [[ -f "$(managed_home_agent_inventory_file)" ]] || [[ -f "$(managed_agent_profile_inventory_file)" ]]; then
         return 0
     fi
 
@@ -1023,6 +1085,10 @@ managed_home_agent_inventory_file() {
     printf '%s/managed-home-agents.txt\n' "$(skill_manager_state_directory)"
 }
 
+managed_agent_profile_inventory_file() {
+    printf '%s/managed-agent-profiles.txt\n' "$(skill_manager_state_directory)"
+}
+
 list_skill_agent_config_files() {
     local skill_name=$1
     local agents_directory="$CODEX_SOURCE/$skill_name/agents"
@@ -1076,6 +1142,14 @@ write_managed_home_agent_inventory_from_repo() {
     sort -u -o "$inventory_file" "$inventory_file"
 }
 
+write_managed_agent_profile_inventory_from_repo() {
+    local inventory_file
+
+    inventory_file="$(managed_agent_profile_inventory_file)"
+    ensure_skill_manager_state_directories
+    list_repo_agent_profile_names > "$inventory_file"
+}
+
 remove_skill_from_managed_inventory() {
     local skill_name=$1
     local inventory_file
@@ -1103,6 +1177,19 @@ remove_home_agent_from_managed_inventory() {
     mv "$temporary_inventory_file" "$inventory_file"
 }
 
+remove_agent_profile_from_managed_inventory() {
+    local agent_profile_name=$1
+    local inventory_file
+    local temporary_inventory_file
+
+    inventory_file="$(managed_agent_profile_inventory_file)"
+    [[ -f "$inventory_file" ]] || return 0
+
+    temporary_inventory_file="$(mktemp)"
+    grep -vxF -- "$agent_profile_name" "$inventory_file" > "$temporary_inventory_file" || true
+    mv "$temporary_inventory_file" "$inventory_file"
+}
+
 list_tracked_managed_skill_names() {
     local inventory_file
     local skill_name
@@ -1121,6 +1208,24 @@ list_tracked_managed_skill_names() {
     done < <(list_repo_skill_names) | LC_ALL=C sort
 }
 
+list_tracked_managed_agent_profile_names() {
+    local inventory_file
+    local agent_profile_name
+
+    inventory_file="$(managed_agent_profile_inventory_file)"
+    if [[ -f "$inventory_file" ]]; then
+        awk 'NF {print $0}' "$inventory_file" | LC_ALL=C sort -u
+        return 0
+    fi
+
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        if [[ -f "$CODEX_TARGET/agent-profiles/$agent_profile_name.toml" ]]; then
+            printf '%s\n' "$agent_profile_name"
+        fi
+    done < <(list_repo_agent_profile_names) | LC_ALL=C sort
+}
+
 list_removed_repo_managed_skill_names() {
     local skill_name
 
@@ -1130,6 +1235,17 @@ list_removed_repo_managed_skill_names() {
             printf '%s\n' "$skill_name"
         fi
     done < <(list_tracked_managed_skill_names) | LC_ALL=C sort
+}
+
+list_removed_repo_managed_agent_profile_names() {
+    local agent_profile_name
+
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        if ! grep -qxF -- "$agent_profile_name" < <(list_repo_agent_profile_names); then
+            printf '%s\n' "$agent_profile_name"
+        fi
+    done < <(list_tracked_managed_agent_profile_names) | LC_ALL=C sort
 }
 
 list_tracked_home_agent_names_for_skill() {
@@ -1312,6 +1428,19 @@ list_repo_skill_names() {
     done | LC_ALL=C sort
 }
 
+list_repo_agent_profile_names() {
+    local skill_name
+    local agent_config_path
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        while IFS= read -r agent_config_path; do
+            [[ -n "$agent_config_path" ]] || continue
+            home_agent_name_from_agent_config "$skill_name" "$agent_config_path"
+        done < <(list_skill_agent_config_files "$skill_name")
+    done < <(list_repo_skill_names) | LC_ALL=C sort -u
+}
+
 repo_skill_names_array() {
     populate_array_from_command REPO_SKILL_NAMES list_repo_skill_names
 }
@@ -1343,6 +1472,57 @@ copy_skill_directory_if_present() {
     fi
 }
 
+prune_runtime_noise_in_directory() {
+    local directory_path=$1
+
+    [[ -d "$directory_path" ]] || return 0
+
+    find "$directory_path" -type d \( -name tests -o -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} + 2>/dev/null || true
+    find "$directory_path" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete 2>/dev/null || true
+}
+
+prune_repo_managed_installation_noise() {
+    local skill_name
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        prune_runtime_noise_in_directory "$CODEX_TARGET/skills/$skill_name"
+        prune_runtime_noise_in_directory "$CODEX_TARGET/$skill_name"
+    done < <(list_repo_skill_names)
+}
+
+list_repo_managed_installation_noise_paths() {
+    local skill_name
+    local skill_directory
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        for skill_directory in "$CODEX_TARGET/skills/$skill_name" "$CODEX_TARGET/$skill_name"; do
+            [[ -d "$skill_directory" ]] || continue
+            find "$skill_directory" \( -type d \( -name tests -o -name __pycache__ -o -name .pytest_cache \) -o -type f \( -name '*.pyc' -o -name '*.pyo' \) \) -print
+        done
+    done < <(list_repo_skill_names) | LC_ALL=C sort -u
+}
+
+verify_repo_managed_installation_hygiene() {
+    local leaked_path
+    local failed=0
+
+    while IFS= read -r leaked_path; do
+        [[ -n "$leaked_path" ]] || continue
+        print_error "Managed install contains runtime-noise artifact: $leaked_path"
+        failed=1
+    done < <(list_repo_managed_installation_noise_paths)
+
+    if [[ $failed -eq 0 ]]; then
+        print_success "Installed runtime hygiene verified"
+        return 0
+    fi
+
+    print_error "Managed install runtime hygiene verification failed"
+    return 1
+}
+
 copy_managed_skill_content() {
     local source_skill_directory=$1
     local target_skill_directory=$2
@@ -1353,6 +1533,8 @@ copy_managed_skill_content() {
     for relative_directory in "${SKILL_SYNC_DIRECTORIES[@]}"; do
         copy_skill_directory_if_present "$source_skill_directory" "$target_skill_directory" "$relative_directory"
     done
+
+    prune_runtime_noise_in_directory "$target_skill_directory"
 }
 
 verify_root_file_checksum() {
@@ -1421,10 +1603,70 @@ verify_skill_checksum() {
     return 1
 }
 
+find_agent_config_path_for_home_agent_name() {
+    local selected_home_agent_name=$1
+    local skill_name
+    local agent_config_path
+    local home_agent_name
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        while IFS= read -r agent_config_path; do
+            [[ -n "$agent_config_path" ]] || continue
+            home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+            if [[ "$home_agent_name" == "$selected_home_agent_name" ]]; then
+                printf '%s\n' "$agent_config_path"
+                return 0
+            fi
+        done < <(list_skill_agent_config_files "$skill_name")
+    done < <(list_repo_skill_names)
+
+    return 1
+}
+
+verify_agent_profile_checksum() {
+    local agent_profile_name=$1
+    local target_path="$CODEX_TARGET/agent-profiles/$agent_profile_name.toml"
+    local expected_profile_path
+    local agent_config_path
+    local expected_checksum
+    local target_checksum
+
+    agent_config_path="$(find_agent_config_path_for_home_agent_name "$agent_profile_name")" || {
+        print_error "Unable to resolve source agent config for agent profile: $agent_profile_name"
+        return 1
+    }
+
+    if [[ ! -f "$target_path" ]]; then
+        print_error "Agent profile is not installed in Codex home: $agent_profile_name"
+        return 1
+    fi
+
+   expected_profile_path="$(mktemp)"
+    write_codex_agent_toml "$agent_config_path" "$expected_profile_path" "$agent_profile_name" "agent-profile" >/dev/null || {
+        rm -f "$expected_profile_path"
+        print_error "Unable to generate expected skill agent profile: $agent_profile_name"
+        return 1
+    }
+
+    expected_checksum="$(md5_for_file "$expected_profile_path")"
+    target_checksum="$(md5_for_file "$target_path")"
+
+    if [[ "$expected_checksum" != "$target_checksum" ]]; then
+        print_error "MD5 verification failed for skill agent profile: $agent_profile_name"
+        rm -f "$expected_profile_path"
+        return 1
+    fi
+
+    rm -f "$expected_profile_path"
+    print_success "MD5 verified for skill agent profile: $agent_profile_name"
+}
+
 verify_pack_checksums() {
     local failed=0
     local skill_name
     local failed_checksum_skill_name
+    local agent_profile_name
 
     if ! pack_is_installed; then
         print_error "Codex skill pack is not installed in Codex home: $CODEX_TARGET"
@@ -1433,6 +1675,13 @@ verify_pack_checksums() {
 
     run_task_line "verify root files" verify_root_file_checksum "AGENTS.md" || failed=1
     run_task_line "verify root routing" verify_root_file_checksum "00-skill-routing-and-escalation.md" || failed=1
+
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        if ! verify_agent_profile_checksum "$agent_profile_name"; then
+            failed=1
+        fi
+    done < <(list_repo_agent_profile_names)
 
     while IFS= read -r failed_checksum_skill_name; do
         [[ -n "$failed_checksum_skill_name" ]] || continue
@@ -1445,6 +1694,14 @@ verify_pack_checksums() {
         print_error "Managed installed skill no longer exists in the repo: $skill_name"
         failed=1
     done < <(list_removed_repo_managed_skill_names)
+
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        print_error "Managed installed agent profile no longer exists in the repo: $agent_profile_name"
+        failed=1
+    done < <(list_removed_repo_managed_agent_profile_names)
+
+    run_task_line "verify runtime hygiene" verify_repo_managed_installation_hygiene || failed=1
 
     if [[ $failed -eq 0 ]]; then
         print_success "All MD5 verification checks passed"
@@ -2137,8 +2394,13 @@ validate_codex_guidance_file() {
             return 1
         fi
 
-        if ! grep -qi "Do not pin a specific model inside ordinary root Codex" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "gpt-5.3-codex-spark" "$file" || ! grep -qi 'reasoning_effort: "high"' "$file" || ! grep -qi "cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly" "$file"; then
-            print_error "Missing model-split, local-override, or runtime model-selection boundary policy in AGENTS.md"
+       if ! grep -qi "Do not pin a specific model inside ordinary root Codex" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "gpt-5.3-codex-spark" "$file" || ! grep -qi 'reasoning_effort: "high"' "$file" || ! grep -qi "cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly" "$file"; then
+           print_error "Missing model-split, local-override, or runtime model-selection boundary policy in AGENTS.md"
+           return 1
+       fi
+
+        if ! grep -qi "~/.codex/agent-profiles/\*\.toml" "$file" || ! grep -qi "12 skill-owned agent profiles" "$file"; then
+            print_error "Missing skill-agent-profile sync policy in AGENTS.md"
             return 1
         fi
 
@@ -2161,11 +2423,15 @@ validate_codex_guidance_file() {
             print_error "Missing scoped-memory or research-cache helper workflow in README.md"
             return 1
         fi
-        if ! grep -qi "sync-skills.ps1" "$file" || ! grep -qi "delegates to `sync-skills.sh`" "$file" || ! grep -qi "Git Bash on Windows" "$file" || ! grep -qi "runtime-guardrails-and-memory-protocols.md" "$file" || ! grep -qi "do not stay solo by default" "$file" || ! grep -qi "top-level plan item per explicit user task" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "memory writer" "$file"; then
-            print_error "Missing Windows wrapper, runtime-guardrails, local-override, or memory-writer documentation in README.md"
+       if ! grep -qi "sync-skills.ps1" "$file" || ! grep -qi "delegates to `sync-skills.sh`" "$file" || ! grep -qi "Git Bash on Windows" "$file" || ! grep -qi "runtime-guardrails-and-memory-protocols.md" "$file" || ! grep -qi "do not stay solo by default" "$file" || ! grep -qi "top-level plan item per explicit user task" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "memory writer" "$file"; then
+           print_error "Missing Windows wrapper, runtime-guardrails, local-override, or memory-writer documentation in README.md"
+           return 1
+       fi
+        if ! grep -qi "agent-profiles/\*\.toml" "$file" || ! grep -qi "skill agent profiles: 12/12" "$file"; then
+            print_error "Missing skill-agent-profile mirror documentation in README.md"
             return 1
         fi
-    fi
+   fi
 
     if [[ "$(basename "$file")" == "00-skill-routing-and-escalation.md" ]]; then
         if ! grep -qi "Reuse Fresh Research First" "$file" || ! grep -qi "Fix The Next Bug Too" "$file" || ! grep -qi "Requirement Reconciliation Before Close" "$file" || ! grep -qi "Status Requests Do Not End The Job" "$file" || ! grep -qi "Write Corrections Before Responding" "$file" || ! grep -qi "Resolve workspace-scoped memory first" "$file" || ! grep -qi "agent-instance lane" "$file" || ! grep -qi "Use Solo Mode Deliberately" "$file" || ! grep -qi "Planning Defaults" "$file" || ! grep -qi "memory-status-reporter" "$file" || ! grep -qi "report what changed" "$file"; then
@@ -2334,14 +2600,14 @@ extract_codex_openai_optional_value() {
     extract_codex_openai_value "$openai_yaml_path" "$field_name" 2>/dev/null || true
 }
 
-sync_codex_home_agent_from_yaml() {
-    local skill_name=$1
-    local openai_yaml_path=$2
+write_codex_agent_toml() {
+    local openai_yaml_path=$1
+    local target_toml_path=$2
     local home_agent_name=$3
-    local home_agent_file="$CODEX_TARGET/agents/$home_agent_name.toml"
+    local sync_mode=$4
 
     if [[ ! -f "$openai_yaml_path" ]]; then
-        print_warning "Skipping home agent sync for $home_agent_name because $openai_yaml_path is missing"
+        print_warning "Skipping $sync_mode sync for $home_agent_name because $openai_yaml_path is missing"
         return 0
     fi
 
@@ -2375,15 +2641,17 @@ sync_codex_home_agent_from_yaml() {
 
     if [[ -n "$local_override_reasoning" ]]; then
         effective_reasoning="$local_override_reasoning"
+    elif [[ "$sync_mode" == "agent-profile" ]] && [[ -n "$configured_reasoning" ]]; then
+        effective_reasoning="$configured_reasoning"
     elif [[ -n "$pinned_model" ]] && [[ -n "$configured_reasoning" ]]; then
         effective_reasoning="$configured_reasoning"
     fi
 
-    run_python - "$home_agent_file" "$default_prompt" "$effective_model" "$effective_reasoning" <<'PY'
+    run_python - "$target_toml_path" "$default_prompt" "$effective_model" "$effective_reasoning" <<'PY'
 from pathlib import Path
 import sys
 
-home_agent_file = Path(sys.argv[1])
+target_toml_path = Path(sys.argv[1])
 default_prompt = sys.argv[2]
 effective_model = sys.argv[3]
 effective_reasoning = sys.argv[4]
@@ -2391,7 +2659,7 @@ effective_reasoning = sys.argv[4]
 if "'''" in default_prompt:
     raise SystemExit("Triple single quotes are not supported inside developer_instructions")
 
-home_agent_file.parent.mkdir(parents=True, exist_ok=True)
+target_toml_path.parent.mkdir(parents=True, exist_ok=True)
 output_lines = []
 if effective_model:
     output_lines.append(f'model = "{effective_model}"')
@@ -2400,10 +2668,29 @@ if effective_reasoning:
 output_lines.append("developer_instructions = '''")
 output_lines.append(default_prompt)
 output_lines.append("'''")
-home_agent_file.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
+target_toml_path.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
 PY
+}
 
+sync_codex_home_agent_from_yaml() {
+    local skill_name=$1
+    local openai_yaml_path=$2
+    local home_agent_name=$3
+    local home_agent_file="$CODEX_TARGET/agents/$home_agent_name.toml"
+
+    write_codex_agent_toml "$openai_yaml_path" "$home_agent_file" "$home_agent_name" "home-agent"
     print_success "Synced $home_agent_name home agent config to Codex"
+    return 0
+}
+
+sync_codex_agent_profile_from_yaml() {
+    local skill_name=$1
+    local openai_yaml_path=$2
+    local home_agent_name=$3
+    local agent_profile_file="$CODEX_TARGET/agent-profiles/$home_agent_name.toml"
+
+    write_codex_agent_toml "$openai_yaml_path" "$agent_profile_file" "$home_agent_name" "agent-profile"
+    print_success "Synced $home_agent_name agent profile to Codex"
     return 0
 }
 
@@ -2423,6 +2710,42 @@ sync_codex_home_agents_for_skill() {
         fi
     done < <(list_skill_agent_config_files "$skill_name")
 
+    return 0
+}
+
+sync_skill_agent_profiles_to_codex() {
+    local skill_name
+    local agent_config_path
+    local home_agent_name
+    local legacy_agent_profile_name
+
+    mkdir -p "$CODEX_TARGET/agent-profiles"
+
+    for legacy_agent_profile_name in default explorer worker architect awaiter; do
+        rm -f "$CODEX_TARGET/agent-profiles/$legacy_agent_profile_name.toml"
+    done
+
+    while IFS= read -r home_agent_name; do
+        [[ -n "$home_agent_name" ]] || continue
+        if ! grep -qxF -- "$home_agent_name" < <(list_repo_agent_profile_names); then
+            rm -f "$CODEX_TARGET/agent-profiles/$home_agent_name.toml"
+            remove_agent_profile_from_managed_inventory "$home_agent_name"
+        fi
+    done < <(list_tracked_managed_agent_profile_names)
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        while IFS= read -r agent_config_path; do
+            [[ -n "$agent_config_path" ]] || continue
+            home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+            if ! sync_codex_agent_profile_from_yaml "$skill_name" "$agent_config_path" "$home_agent_name"; then
+                print_error "Failed to sync $home_agent_name agent profile"
+                return 1
+            fi
+        done < <(list_skill_agent_config_files "$skill_name")
+    done < <(list_repo_skill_names)
+
+    write_managed_agent_profile_inventory_from_repo
     return 0
 }
 
@@ -2589,7 +2912,10 @@ sync_codex() {
     mkdir -p "$CODEX_TARGET"
     mkdir -p "$CODEX_TARGET/skills"
     mkdir -p "$CODEX_TARGET/agents"
+    mkdir -p "$CODEX_TARGET/agent-profiles"
     mkdir -p "$CODEX_TARGET/memories"
+
+    run_task_line "seed local overrides" seed_default_local_home_agent_overrides || return 1
 
     run_task_line "validate docs" validate_codex_repo_docs || {
         print_error "Codex guidance validation failed, aborting Codex sync"
@@ -2610,14 +2936,19 @@ sync_codex() {
         run_task_line "sync $skill_name" sync_skill_to_codex "$skill_name" || return 1
     done < <(list_repo_skill_names)
 
+    run_task_line "sync skill agent profiles" sync_skill_agent_profiles_to_codex || return 1
+
     run_task_line "sync memory wiring" sync_memory_status_reporter_home_wiring || {
         print_error "Failed to sync memory-status-reporter live home wiring"
         return 1
     }
 
+    run_task_line "prune install noise" prune_repo_managed_installation_noise || return 1
+
     run_task_line "write install metadata" write_install_metadata || return 1
     run_task_line "track managed skills" write_managed_skill_inventory_from_repo || return 1
     run_task_line "track managed agents" write_managed_home_agent_inventory_from_repo || return 1
+    run_task_line "track managed agent profiles" write_managed_agent_profile_inventory_from_repo || return 1
 
     if ! verify_pack_checksums; then
         print_error "MD5 verification failed after sync; Codex home may be partial"
@@ -2634,6 +2965,11 @@ sync_codex_delta_update() {
     local changed_skills=("$@")
     local removed_skills=()
     local skill_name
+
+    if ! seed_default_local_home_agent_overrides; then
+        print_error "Failed to seed local home-agent overrides"
+        return 1
+    fi
 
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
@@ -2659,6 +2995,11 @@ sync_codex_delta_update() {
         fi
     done
 
+    if ! sync_skill_agent_profiles_to_codex; then
+        print_error "Failed to sync skill agent profiles"
+        return 1
+    fi
+
     if [[ "$root_files_changed" == "true" ]] || [[ " ${changed_skills[*]} " == *" memory-status-reporter "* ]]; then
         if ! sync_memory_status_reporter_home_wiring; then
             print_error "Failed to sync memory-status-reporter live home wiring"
@@ -2666,9 +3007,15 @@ sync_codex_delta_update() {
         fi
     fi
 
+    if ! prune_repo_managed_installation_noise; then
+        print_error "Failed to prune managed install noise"
+        return 1
+    fi
+
     write_install_metadata
     write_managed_skill_inventory_from_repo
     write_managed_home_agent_inventory_from_repo
+    write_managed_agent_profile_inventory_from_repo
 
     if ! verify_pack_checksums; then
         print_error "MD5 verification failed after update; Codex home may be partial"
@@ -2760,6 +3107,29 @@ collect_changed_skills_parallel() {
     return $parallel_exit_code
 }
 
+collect_changed_agent_profile_names() {
+    local agent_profile_name
+
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        if ! verify_agent_profile_checksum "$agent_profile_name" >/dev/null 2>&1; then
+            printf "%s\n" "$agent_profile_name"
+        fi
+    done < <(list_repo_agent_profile_names)
+}
+
+agent_profiles_need_update() {
+    if [[ -n "$(collect_changed_agent_profile_names)" ]]; then
+        return 0
+    fi
+
+    if [[ -n "$(list_removed_repo_managed_agent_profile_names)" ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 skill_needs_update() {
     local skill_name=$1
     local changed_skill_name
@@ -2791,6 +3161,18 @@ collect_removed_skills() {
 }
 
 core_files_need_update() {
+    if root_guidance_files_need_update; then
+        return 0
+    fi
+
+    if agent_profiles_need_update; then
+        return 0
+    fi
+
+    return 1
+}
+
+root_guidance_files_need_update() {
     local relative_path
 
     for relative_path in "AGENTS.md" "00-skill-routing-and-escalation.md"; do
@@ -2812,12 +3194,17 @@ core_files_need_update() {
 show_checksum_status() {
     local changed_skills=()
     local removed_skills=()
+    local changed_agent_profiles=()
+    local removed_agent_profiles=()
     local skill_name
+    local agent_profile_name
 
     if ! pack_is_installed; then
         echo "  core file checksum status: not installed"
+        echo "  skill agent profile checksum status: not installed"
         echo "  skill checksum status: not installed"
         echo "  stale managed skills: none"
+        echo "  stale managed agent profiles: none"
         return 0
     fi
 
@@ -2827,6 +3214,11 @@ show_checksum_status() {
             changed_skills+=("$skill_name")
         fi
     done < <(list_repo_skill_names)
+
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        changed_agent_profiles+=("$agent_profile_name")
+    done < <(collect_changed_agent_profile_names)
 
     if core_files_need_update; then
         echo "  core file checksum status: drift detected"
@@ -2840,15 +3232,32 @@ show_checksum_status() {
         echo "  skill checksum status: drift in ${changed_skills[*]}"
     fi
 
+    if [[ ${#changed_agent_profiles[@]} -eq 0 ]]; then
+        echo "  skill agent profile checksum status: all installed agent profiles match source"
+    else
+        echo "  skill agent profile checksum status: drift in ${changed_agent_profiles[*]}"
+    fi
+
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
         removed_skills+=("$skill_name")
     done < <(list_removed_repo_managed_skill_names)
 
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        removed_agent_profiles+=("$agent_profile_name")
+    done < <(list_removed_repo_managed_agent_profile_names)
+
     if [[ ${#removed_skills[@]} -eq 0 ]]; then
         echo "  stale managed skills: none"
     else
         echo "  stale managed skills: ${removed_skills[*]}"
+    fi
+
+    if [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
+        echo "  stale managed agent profiles: none"
+    else
+        echo "  stale managed agent profiles: ${removed_agent_profiles[*]}"
     fi
 }
 
@@ -2860,7 +3269,12 @@ remove_home_agent_installation() {
         rm -f "$CODEX_TARGET/agents/$home_agent_name.toml"
     fi
 
+    if [[ -f "$CODEX_TARGET/agent-profiles/$home_agent_name.toml" ]]; then
+        rm -f "$CODEX_TARGET/agent-profiles/$home_agent_name.toml"
+    fi
+
     remove_home_agent_from_managed_inventory "$skill_name" "$home_agent_name"
+    remove_agent_profile_from_managed_inventory "$home_agent_name"
 }
 
 remove_stale_home_agents_for_skill() {
@@ -2955,11 +3369,16 @@ remove_skill_installation() {
 
 remove_skill_pack() {
     local skill_name
+    local legacy_agent_profile_name
 
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
         remove_skill_installation "$skill_name"
     done < <(list_tracked_managed_skill_names)
+
+    for legacy_agent_profile_name in default explorer worker architect awaiter; do
+        rm -f "$CODEX_TARGET/agent-profiles/$legacy_agent_profile_name.toml"
+    done
 
     rm -f "$CODEX_TARGET/AGENTS.md"
     rm -f "$CODEX_TARGET/00-skill-routing-and-escalation.md"
@@ -2976,11 +3395,18 @@ remove_skill_pack() {
 apply_repo_managed_changes() {
     local changed_skills=()
     local removed_skills=()
+    local changed_agent_profiles=()
+    local removed_agent_profiles=()
     local skill_name
     local root_files_changed="false"
 
     if ! ensure_sync_runtime_prerequisites; then
         print_error "Runtime prerequisites failed, aborting update"
+        return 1
+    fi
+
+    if ! seed_default_local_home_agent_overrides; then
+        print_error "Failed to seed local home-agent overrides"
         return 1
     fi
 
@@ -2997,14 +3423,24 @@ apply_repo_managed_changes() {
 
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
-        removed_skills+=("$skill_name")
-    done < <(list_removed_repo_managed_skill_names)
+        changed_agent_profiles+=("$skill_name")
+    done < <(collect_changed_agent_profile_names)
 
-    if core_files_need_update; then
-        root_files_changed="true"
-    fi
+   while IFS= read -r skill_name; do
+       [[ -n "$skill_name" ]] || continue
+       removed_skills+=("$skill_name")
+   done < <(list_removed_repo_managed_skill_names)
 
-    if [[ "$root_files_changed" == "false" ]] && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]]; then
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        removed_agent_profiles+=("$skill_name")
+    done < <(list_removed_repo_managed_agent_profile_names)
+
+   if root_guidance_files_need_update; then
+       root_files_changed="true"
+   fi
+
+    if [[ "$root_files_changed" == "false" ]] && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]] && [[ ${#changed_agent_profiles[@]} -eq 0 ]] && [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
         print_success "Installed skill pack is already up to date"
         verify_pack_checksums || return 1
         write_install_metadata || return 1
@@ -3012,7 +3448,7 @@ apply_repo_managed_changes() {
         return 0
     fi
 
-    print_info "update plan: manager=$(get_manager_version) repo=$(get_repo_version) installed=$(get_installed_version) changed=${#changed_skills[@]} removed=${#removed_skills[@]} root_refresh=$root_files_changed"
+    print_info "update plan: manager=$(get_manager_version) repo=$(get_repo_version) installed=$(get_installed_version) changed=${#changed_skills[@]} removed=${#removed_skills[@]} agent_profiles=${#changed_agent_profiles[@]} retired_agent_profiles=${#removed_agent_profiles[@]} root_refresh=$root_files_changed"
     sync_codex_delta_update "$root_files_changed" "${changed_skills[@]}" || return 1
     refresh_bootstrap_entry_script_from_repo
 }
@@ -3230,8 +3666,11 @@ summarize_self_update_status() {
 summarize_skill_pack_update_status() {
     local changed_skills=()
     local removed_skills=()
+    local changed_agent_profiles=()
+    local removed_agent_profiles=()
     local detail_parts=()
     local skill_name
+    local agent_profile_name
 
     if ! pack_is_installed; then
         printf 'not installed\n'
@@ -3243,17 +3682,27 @@ summarize_skill_pack_update_status() {
         changed_skills+=("$skill_name")
     done < <(collect_changed_skills_parallel)
 
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        changed_agent_profiles+=("$agent_profile_name")
+    done < <(collect_changed_agent_profile_names)
+
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
         removed_skills+=("$skill_name")
     done < <(list_removed_repo_managed_skill_names)
 
-    if ! core_files_need_update && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]]; then
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        removed_agent_profiles+=("$agent_profile_name")
+    done < <(list_removed_repo_managed_agent_profile_names)
+
+    if ! core_files_need_update && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]] && [[ ${#changed_agent_profiles[@]} -eq 0 ]] && [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
         printf 'up to date\n'
         return 0
     fi
 
-    if core_files_need_update; then
+    if root_guidance_files_need_update; then
         detail_parts+=("root guidance changed")
     fi
 
@@ -3261,8 +3710,16 @@ summarize_skill_pack_update_status() {
         detail_parts+=("${#changed_skills[@]} skill change(s)")
     fi
 
+    if [[ ${#changed_agent_profiles[@]} -gt 0 ]]; then
+        detail_parts+=("${#changed_agent_profiles[@]} agent profile change(s)")
+    fi
+
     if [[ ${#removed_skills[@]} -gt 0 ]]; then
         detail_parts+=("${#removed_skills[@]} retired skill(s)")
+    fi
+
+    if [[ ${#removed_agent_profiles[@]} -gt 0 ]]; then
+        detail_parts+=("${#removed_agent_profiles[@]} retired agent profile(s)")
     fi
 
     printf 'update available (%s)\n' "$(IFS=", "; echo "${detail_parts[*]}")"
@@ -3307,10 +3764,13 @@ show_status() {
 
     local codex_source_count=0
     local codex_synced_count=0
-    local codex_home_agent_total=0
-    local codex_home_agent_inheriting=0
-    local codex_home_agent_overrides=()
-    for skill_dir in "$CODEX_SOURCE"/*/; do
+   local codex_home_agent_total=0
+   local codex_home_agent_inheriting=0
+   local codex_home_agent_overrides=()
+    local codex_agent_profile_total=0
+    local codex_agent_profile_synced=0
+    local codex_agent_profile_medium=0
+   for skill_dir in "$CODEX_SOURCE"/*/; do
         if [[ -f "$skill_dir/SKILL.md" ]]; then
             ((codex_source_count+=1))
             local skill_name=$(basename "$skill_dir")
@@ -3321,20 +3781,28 @@ show_status() {
             local agent_config_path
             while IFS= read -r agent_config_path; do
                 [[ -n "$agent_config_path" ]] || continue
-                local home_agent_name
-                home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
-                local home_agent_file="$CODEX_TARGET/agents/$home_agent_name.toml"
-                if [[ -f "$home_agent_file" ]]; then
-                    ((codex_home_agent_total+=1))
-                    if ! grep -qE '^(model|model_reasoning_effort) =' "$home_agent_file"; then
-                        ((codex_home_agent_inheriting+=1))
-                    else
-                        codex_home_agent_overrides+=("$home_agent_name")
+               local home_agent_name
+               home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+               local home_agent_file="$CODEX_TARGET/agents/$home_agent_name.toml"
+                local agent_profile_file="$CODEX_TARGET/agent-profiles/$home_agent_name.toml"
+                ((codex_agent_profile_total+=1))
+               if [[ -f "$home_agent_file" ]]; then
+                   ((codex_home_agent_total+=1))
+                   if ! grep -qE '^(model|model_reasoning_effort) =' "$home_agent_file"; then
+                       ((codex_home_agent_inheriting+=1))
+                   else
+                       codex_home_agent_overrides+=("$home_agent_name")
+                   fi
+               fi
+                if [[ -f "$agent_profile_file" ]]; then
+                    ((codex_agent_profile_synced+=1))
+                    if grep -q '^model_reasoning_effort = "medium"$' "$agent_profile_file"; then
+                        ((codex_agent_profile_medium+=1))
                     fi
                 fi
-            done < <(list_skill_agent_config_files "$skill_name")
-        fi
-    done
+           done < <(list_skill_agent_config_files "$skill_name")
+       fi
+   done
 
     if [[ -d "$CODEX_TARGET/skills" ]]; then
         echo "  Synced skills: $codex_synced_count/$codex_source_count"
@@ -3350,6 +3818,16 @@ show_status() {
         echo "  memory-status-reporter agent: missing"
     fi
 
+    local memory_status_override_model
+    local memory_status_override_reasoning
+    memory_status_override_model="$(read_local_home_agent_override_value "memory-status-reporter" "model" || true)"
+    memory_status_override_reasoning="$(read_local_home_agent_override_value "memory-status-reporter" "reasoning_effort" || true)"
+    if [[ -n "$memory_status_override_model" ]]; then
+        echo "  memory-status-reporter local override: $memory_status_override_model (${memory_status_override_reasoning:-default reasoning})"
+    else
+        echo "  memory-status-reporter local override: missing"
+    fi
+
     if [[ -f "$CODEX_TARGET/config.toml" ]] && grep -q "^\[agents\.memory-status-reporter\]" "$CODEX_TARGET/config.toml" && config_has_required_memory_status_lines "$CODEX_TARGET/config.toml"; then
         echo "  memory-status-reporter config: synced"
     elif config_has_any_memory_status_lines "$CODEX_TARGET/config.toml"; then
@@ -3358,10 +3836,15 @@ show_status() {
         echo "  memory-status-reporter config: missing"
     fi
 
-    if [[ -d "$CODEX_TARGET/memories/workspaces" ]] && [[ -d "$CODEX_TARGET/memories/agents" ]] && [[ -d "$CODEX_TARGET/memories/research_cache" ]] && [[ -d "$CODEX_TARGET/memories/archive" ]]; then
-        echo "  memory scope layout: synced"
-    else
-        echo "  memory scope layout: missing"
+   if [[ -d "$CODEX_TARGET/memories/workspaces" ]] && [[ -d "$CODEX_TARGET/memories/agents" ]] && [[ -d "$CODEX_TARGET/memories/research_cache" ]] && [[ -d "$CODEX_TARGET/memories/archive" ]]; then
+       echo "  memory scope layout: synced"
+   else
+       echo "  memory scope layout: missing"
+   fi
+
+    echo "  skill agent profiles: $codex_agent_profile_synced/$codex_agent_profile_total"
+    if [[ $codex_agent_profile_total -gt 0 ]]; then
+        echo "  skill agent profile medium baseline: $codex_agent_profile_medium/$codex_agent_profile_total"
     fi
 
     if [[ $codex_home_agent_total -gt 0 ]]; then

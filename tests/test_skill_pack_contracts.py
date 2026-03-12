@@ -356,6 +356,8 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("local-home-agent-overrides.json", root_guidance_text)
         self.assertIn("gpt-5.3-codex-spark", root_guidance_text)
         self.assertIn('reasoning_effort: "high"', root_guidance_text)
+        self.assertIn("~/.codex/agent-profiles/*.toml", root_guidance_text)
+        self.assertIn("12 skill-owned agent profiles", root_guidance_text)
         self.assertIn("delegate the durable write to the `memory-status-reporter` lane", root_guidance_text)
         self.assertNotIn("responsible for writing the durable memory update", root_guidance_text)
         self.assertIn("Requirement Reconciliation Before Close", routing_text)
@@ -380,7 +382,11 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("security-audit-status.md", readme_text)
         self.assertIn("Git Bash on Windows", readme_text)
         self.assertIn("local-home-agent-overrides.json", readme_text)
+        self.assertIn("agent-profiles/*.toml", readme_text)
+        self.assertIn("skill agent profiles: 12/12", readme_text)
         self.assertIn("let it act as the memory writer", readme_text)
+        self.assertIn("seeds and preserves", readme_text)
+        self.assertIn("prunes runtime-noise artifacts", readme_text)
 
     def test_runtime_guardrails_capture_working_buffer_threshold_and_bounded_self_improvement(self) -> None:
         runtime_guardrails_text = read_text(
@@ -2236,6 +2242,200 @@ Notes:
             )
             self.assertIn('model = "gpt-5.3-codex-spark"', completed_process.stdout)
             self.assertIn('model_reasoning_effort = "high"', completed_process.stdout)
+
+    def test_skill_agent_profiles_sync_to_codex_home_with_skill_prompts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agents" "$(skill_manager_state_directory)"; '
+                'seed_default_local_home_agent_overrides; '
+                'while IFS= read -r skill_name; do sync_codex_home_agents_for_skill "$skill_name"; done < <(list_repo_skill_names); '
+                'sync_skill_agent_profiles_to_codex; '
+                "find \"$CODEX_TARGET/agent-profiles\" -maxdepth 1 -type f -name '*.toml' | wc -l; "
+               'test -f "$CODEX_TARGET/agent-profiles/reviewer.toml"; '
+               'test -f "$CODEX_TARGET/agent-profiles/memory-status-reporter.toml"; '
+               "grep -q '^model_reasoning_effort = \"medium\"$' \"$CODEX_TARGET/agent-profiles/reviewer.toml\"; "
+               "grep -q '^model = \"gpt-5.3-codex-spark\"$' \"$CODEX_TARGET/agent-profiles/memory-status-reporter.toml\"; "
+               "grep -q '^model_reasoning_effort = \"high\"$' \"$CODEX_TARGET/agent-profiles/memory-status-reporter.toml\"; "
+                'test ! -f "$CODEX_TARGET/agent-profiles/default.toml"; '
+                'test ! -f "$CODEX_TARGET/agent-profiles/explorer.toml"; '
+                'test ! -f "$CODEX_TARGET/agent-profiles/worker.toml"; '
+                'test ! -f "$CODEX_TARGET/agent-profiles/architect.toml"; '
+                'test ! -f "$CODEX_TARGET/agent-profiles/awaiter.toml"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertIn("12", completed_process.stdout)
+
+    def test_apply_repo_managed_changes_repairs_missing_skill_agent_profiles_even_without_skill_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+               f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agents" "$(skill_manager_state_directory)"; '
+                'seed_default_local_home_agent_overrides >/dev/null; '
+                'while IFS= read -r skill_name; do sync_codex_home_agents_for_skill "$skill_name"; done < <(list_repo_skill_names); '
+                'sync_skill_agent_profiles_to_codex >/dev/null; '
+                'write_managed_skill_inventory_from_repo; '
+                'write_managed_home_agent_inventory_from_repo; '
+                'write_managed_agent_profile_inventory_from_repo; '
+                'write_install_metadata; '
+               'rm -rf "$CODEX_TARGET/agent-profiles"; '
+                'collect_changed_skills_parallel() { return 0; }; '
+                'list_removed_repo_managed_skill_names() { return 0; }; '
+                'root_guidance_files_need_update() { return 1; }; '
+                'verify_pack_checksums() { return 0; }; '
+               'apply_repo_managed_changes; '
+               'test -f "$CODEX_TARGET/agent-profiles/reviewer.toml"; '
+               'test -f "$(skill_manager_local_home_agent_override_file)"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+
+    def test_verify_pack_checksums_accepts_synced_skill_agent_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            setup_command = (
+                'mkdir -p "$CODEX_TARGET/agents" "$CODEX_TARGET/agent-profiles" "$(skill_manager_state_directory)"; '
+                'seed_default_local_home_agent_overrides >/dev/null; '
+                'sync_root_guidance_files >/dev/null; '
+                'while IFS= read -r skill_name; do '
+                'sync_codex_home_agents_for_skill "$skill_name" >/dev/null || exit $?; '
+                'done < <(list_repo_skill_names); '
+                'sync_skill_agent_profiles_to_codex >/dev/null; '
+                'write_install_metadata; '
+                'write_managed_agent_profile_inventory_from_repo; '
+            )
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                f'{setup_command}'
+                'collect_failed_checksum_skill_names_parallel() { return 0; }; '
+                'verify_pack_checksums'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertIn("MD5 verified for skill agent profile: reviewer", completed_process.stdout)
+            self.assertIn(
+                "MD5 verified for skill agent profile: memory-status-reporter",
+                completed_process.stdout,
+            )
+
+    def test_skill_pack_status_is_up_to_date_after_syncing_skill_agent_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            setup_command = (
+                'mkdir -p "$CODEX_TARGET/agents" "$CODEX_TARGET/agent-profiles" "$(skill_manager_state_directory)"; '
+                'seed_default_local_home_agent_overrides >/dev/null; '
+                'sync_root_guidance_files >/dev/null; '
+                'while IFS= read -r skill_name; do '
+                'sync_codex_home_agents_for_skill "$skill_name" >/dev/null || exit $?; '
+                'done < <(list_repo_skill_names); '
+                'sync_skill_agent_profiles_to_codex >/dev/null; '
+                'write_install_metadata; '
+                'write_managed_agent_profile_inventory_from_repo; '
+            )
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                f'{setup_command}'
+                'collect_changed_skills_parallel() { return 0; }; '
+                'root_guidance_files_need_update() { return 1; }; '
+                'list_removed_repo_managed_skill_names() { return 0; }; '
+                'list_removed_repo_managed_agent_profile_names() { return 0; }; '
+                'status_output="$(summarize_skill_pack_update_status)"; '
+                'printf "%s" "$status_output"; '
+                'test "$status_output" = "up to date"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+
+    def test_install_seed_populates_memory_writer_fast_lane_without_clobbering_other_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$(skill_manager_state_directory)"; '
+                'cat > "$(skill_manager_local_home_agent_override_file)" <<\'JSON\'\n'
+                '{\n'
+                '  "custom-helper": {\n'
+                '    "model": "gpt-5.4"\n'
+                '  }\n'
+                '}\n'
+                'JSON\n'
+                'seed_default_local_home_agent_overrides; '
+                'cat "$(skill_manager_local_home_agent_override_file)"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            payload = json.loads(completed_process.stdout[completed_process.stdout.index("{"):])
+            self.assertEqual({"model": "gpt-5.4"}, payload["custom-helper"])
+            self.assertEqual("gpt-5.3-codex-spark", payload["memory-status-reporter"]["model"])
+            self.assertEqual("high", payload["memory-status-reporter"]["reasoning_effort"])
+
+    def test_prune_repo_managed_installation_noise_removes_tests_and_caches_from_codex_home(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/tests/__pycache__"; '
+                'mkdir -p "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/scripts/__pycache__"; '
+                'mkdir -p "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/.pytest_cache"; '
+                'printf "ok\n" > "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/SKILL.md"; '
+                'printf "runtime\n" > "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py"; '
+                'printf "test\n" > "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/tests/test_design_intelligence.py"; '
+                'printf "cache\n" > "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/scripts/__pycache__/design_intelligence.cpython-313.pyc"; '
+                'printf "cache\n" > "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/.pytest_cache/state"; '
+                'prune_repo_managed_installation_noise; '
+                'verify_repo_managed_installation_hygiene; '
+                'test ! -e "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/tests"; '
+                'test ! -e "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/scripts/__pycache__"; '
+                'test ! -e "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/.pytest_cache"; '
+                'test -f "$CODEX_TARGET/skills/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
 
     def test_sync_validate_smoke_passes_from_absolute_script_path(self) -> None:
         if os.environ.get("CODEX_SKIP_VALIDATE_SMOKE") == "1":

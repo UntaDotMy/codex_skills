@@ -73,7 +73,7 @@ Required flow:
    - Windows: download `sync-skills.ps1`, then run `powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install`
 3. If the repo is already present, use the normal repo-managed `sync-skills.sh` or `sync-skills.ps1` entrypoint there.
 4. After install, run `status`.
-5. Tell me whether repo version, installed version, memory-status-reporter wiring, agent inheritance, and MD5 verification all pass.
+ 5. Tell me whether repo version, installed version, memory-status-reporter wiring, skill agent profiles, agent inheritance, and MD5 verification all pass.
 
 If anything fails:
 - identify the exact failing step,
@@ -290,13 +290,15 @@ The sync does all of the following:
 - copies root skills into `~/.codex/skills/`
 - copies `AGENTS.md` and `00-skill-routing-and-escalation.md` into `~/.codex/`
 - refreshes `~/.codex/agents/*.toml` from each root `agents/openai.yaml`
+- mirrors those 12 skill-owned agents into `~/.codex/agent-profiles/*.toml` so `reviewer`, `memory-status-reporter`, and the other specialist lanes are available as full agent profiles with the same skill instructions attached
 - keeps repo-managed specialist skills on the repo baseline of `reasoning_effort: "medium"` instead of mirroring the main-agent slow lane in source
 - keeps `~/.codex/config.toml` wired for `memory-status-reporter`
-- allows explicit local home-agent overrides in `~/.codex/.codex-skill-manager/local-home-agent-overrides.json` for bounded fast helper lanes without changing repo policy
+- seeds and preserves `~/.codex/.codex-skill-manager/local-home-agent-overrides.json` for the bounded `memory-status-reporter` fast helper lane (`gpt-5.3-codex-spark` + `high`) while still keeping model overrides local to the user home
 - writes install metadata with the current repo version
 - tracks the repo-managed installed skill set for update and uninstall safety
 - compares source and installed files with MD5 checksums after sync
 - verifies the managed install surface only: `SKILL.md`, `references/`, `scripts/`, `data/`, `agents/`, `templates/`, `examples/`, and `assets/`
+- prunes runtime-noise artifacts from managed installs in `~/.codex`, including `tests/`, `.pytest_cache/`, `__pycache__/`, `*.pyc`, and `*.pyo`
 - applies delta updates by refreshing changed repo-managed skills, updating changed root guidance files, and pruning repo-managed skills that disappeared from the source tree
 - injects shared execution-policy lines for working briefs, context efficiency, modular structure, surgical patches, compact learning snapshots, and freshness-aware research reuse
 
@@ -530,7 +532,7 @@ Run:
 
 Then verify `~/.codex/config.toml` contains the `memory-status-reporter` route line, the `memory-status-reporter` agent block, and the injected execution-policy lines for working briefs, context retrieval, surgical patching, modular structure, and learning snapshots.
 
-Also verify `./sync-skills.sh status` reports full agent inheritance unless you intentionally added your own local overrides. In the current repo policy, repo-managed specialist skills stay at the repo baseline of `reasoning_effort: "medium"` in source, optional fast helper lanes can be pinned only through `~/.codex/.codex-skill-manager/local-home-agent-overrides.json`, and built-in runtime roles such as `explorer`, `reviewer`, `worker`, and `architect` still depend on runtime model-selection support.
+ Also verify `./sync-skills.sh status` reports `skill agent profiles: 12/12`, `skill agent profile medium baseline: 11/12` or `12/12` depending on whether the local memory override is active, and the expected `memory-status-reporter` local override. In the current repo policy, repo-managed specialist skills stay at the repo baseline of `reasoning_effort: "medium"` in source, the synced `~/.codex/agent-profiles/*.toml` surface mirrors those 12 skill-owned lanes, and only the bounded `memory-status-reporter` fast lane should be promoted through `~/.codex/.codex-skill-manager/local-home-agent-overrides.json`.
 
 ### Optional fast-lane home-agent overrides
 
@@ -545,7 +547,7 @@ Keep the repo policy simple by leaving root `agents/openai.yaml` files model-agn
 }
 ```
 
-Save that JSON to `~/.codex/.codex-skill-manager/local-home-agent-overrides.json`. Use it only for bounded helper lanes such as memory writes, research-cache maintenance, completion-gate updates, file inventories, diff summaries, or small doc-only audits. Do not use it to globally repin built-in runtime roles such as `explorer`, `reviewer`, `worker`, or `architect`.
+ `sync-skills.sh install` and `sync-skills.sh update` now seed that file automatically for `memory-status-reporter` when it is missing or incomplete, while preserving unrelated local override entries. Use it only for bounded helper lanes such as memory writes, research-cache maintenance, completion-gate updates, file inventories, diff summaries, or small doc-only audits. Do not use it to repin the whole skill pack; the repo-managed `agent-profiles/*.toml` mirror already keeps the 12 specialist lanes aligned, while only `memory-status-reporter` should move to the Spark fast lane locally.
 
 When durable memory needs to change, route that write through the `memory-status-reporter` lane, let it act as the memory writer, then verify the touched memory files are clean and in sync before closing the task.
 

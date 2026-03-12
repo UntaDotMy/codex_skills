@@ -39,6 +39,7 @@ The repository is now aligned as a Codex-only skill pack. The sync workflow is f
 - The script detects macOS, Linux, and Windows shells and resolves Codex home accurately
 - The script now detects a working Python launcher (`python3`, `python`, or `py -3`) before mutating Codex home
 - The script syncs skills, root guidance, home agent TOMLs, and `memory-status-reporter` global config wiring
+- The script also mirrors the 12 skill-owned lanes into `~/.codex/agent-profiles/*.toml`, replacing the old generic default or explorer-style profile surface with specialist profiles such as `reviewer` and `memory-status-reporter`.
 - The script tracks repo-managed installed skills so update and uninstall can prune removed skills safely
 - The `update` command now applies a repo-managed delta refresh instead of always rerunning a full pack refresh
 - The `github-update` command now fetches the tracked remote, fast-forwards safely, supports non-`origin` remotes, and rejects local-ahead branches
@@ -54,6 +55,7 @@ The repository is now aligned as a Codex-only skill pack. The sync workflow is f
 - The memory report script now supports a compact footer mode for final-answer snapshots
 - Heuristic growth metrics remain clearly labeled as artifact-based estimates, not literal cognition
 - Repo-managed skill agents now inherit the workspace model and reasoning baseline, while built-in runtime roles still depend on runtime model-selection support
+- The synced `agent-profiles/*.toml` surface now mirrors the 12 skill-owned specialist lanes with `medium` reasoning by default, while the local `memory-status-reporter` override can still promote that one lane to Spark/high.
 
 ### Documentation
 - `README.md` is now a Codex-only setup and workflow guide

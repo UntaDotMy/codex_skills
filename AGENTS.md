@@ -106,16 +106,22 @@ When multi-agent is used, adhere to the following collaboration lifecycle to avo
 
 ### Agent Profiles
 
-Your Codex CLI has these agent profiles configured:
+Your managed Codex home should expose these 12 skill-owned agent profiles under `~/.codex/agent-profiles/*.toml`:
 
-- **default**: Balanced speed and depth for general tasks
-- **explorer**: Fast scanning for discovery and lightweight exploration
-- **worker**: Implementation-heavy tasks with deeper reasoning
-- **awaiter**: Wait/monitor tasks (keep cheap)
-- **reviewer**: Feedback/review with balanced depth
-- **architect**: Architecture and context reading
+- **backend-and-data-architecture**: Backend systems, APIs, data models, caching, and messaging
+- **cloud-and-devops-expert**: Infrastructure, CI/CD, containers, and IaC
+- **git-expert**: Git workflows, history surgery, branching, and release hygiene
+- **memory-status-reporter**: Memory health, durable memory writes, research cache, and completion tracking
+- **mobile-development-life-cycle**: Android and iOS lifecycle, permissions, offline sync, and release flow
+- **qa-and-automation-engineer**: Test automation, regression coverage, E2E flow, and validation strategy
+- **reviewer**: Feedback, code review, production-readiness checks, and final quality gate
+- **security-and-compliance-auditor**: Vulnerability hunting, threat modeling, and compliance checks
+- **software-development-life-cycle**: Sequencing, architecture framing, and cross-domain delivery coordination
+- **ui-design-systems-and-responsive-interfaces**: Responsive UI, accessibility, design systems, and visual consistency
+- **ux-research-and-experience-strategy**: Research planning, usability evidence, and experience strategy
+- **web-development-life-cycle**: Web app architecture, browser behavior, performance, SEO, and deployment
 
-Use appropriate profiles based on task needs, but don't over-complicate.
+The old generic `default`, `explorer`, `worker`, `architect`, and `awaiter` TOMLs are not the repo-managed profile surface anymore. Runtime helper roles may still exist inside Codex, but the managed install should mirror these 12 specialist skill lanes instead.
 
 ## Execution Strategy
 
@@ -692,6 +698,7 @@ Codex CLI does not need to mirror the main agent's strongest lane across every s
 - Do not pin a specific model inside ordinary root Codex `agents/openai.yaml` files. Let the workspace default model handle that choice; this repo assumes the workspace default is `gpt-5.4`.
 - Keep root Codex skill `reasoning_effort` at the repo-managed specialist baseline (`medium`) instead of mirroring the main-agent slow lane.
 - Home agent TOMLs should inherit model by default. Use explicit local overrides under `~/.codex/.codex-skill-manager/local-home-agent-overrides.json` only for bounded helper lanes that benefit from a faster or different model.
+- Sync the 12 skill-owned agent profiles into `~/.codex/agent-profiles/*.toml` so `reviewer`, `memory-status-reporter`, and the other specialist lanes are available as full profiles with their skill instructions attached, not just as raw skills. Keep those repo-managed skill agent profiles at `medium` reasoning by default, and let the local `memory-status-reporter` override promote only that lane to `gpt-5.3-codex-spark` plus `high`.
 - Built-in spawned runtime roles such as `explorer`, `reviewer`, `worker`, and `architect` cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly.
 - When any Codex skill executes tools in this runtime, route the tool work through `js_repl` with `codex.tool(...)` rather than calling tools directly.
 
