@@ -335,6 +335,7 @@ MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- When durable memory must change, delegate the write to memory-status-reporter when that lane is available, let it report what changed, and validate the touched memory files before finalizing."
     "- Use SESSION-STATE.md only for durable corrections, decisions, names, preferences, exact values, or confirmed constraints; use working-buffer.md only for long-running or high-context work; use research_cache.py, completion_gate.py, and agent_registry.py only when their specific trigger conditions apply."
     "- Start every non-trivial task by translating the raw request into a working brief: user story, desired outcome, constraints, assumptions, acceptance criteria, edge cases, and validation plan."
+    "- If the request names a function, module, route, or script, keep the first implementation pass anchored to that named scope and widen only when traced impact proves it is required."
     "- If a non-trivial task clearly belongs to one specialist surface, do not stay solo by default; route to that owning skill or staff a bounded specialist lane instead of keeping all work in the main lane."
     "- For multi-part requests, preserve one top-level plan item per explicit user task and give each top-level item its own breakdown, validation target, and completion check before implementation."
     "- Strengthen vague prompts from repository, runtime, and memory evidence before acting; if business logic remains ambiguous, clarify instead of drifting."
@@ -346,7 +347,10 @@ MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- Resolve workspace-scoped memory and shared research-cache paths before loading broad global memory: prefer ~/.codex/memories/workspaces/<workspace-slug>/ for shared project notes, ~/.codex/memories/workspaces/<workspace-slug>/workstreams/<workstream-key>/ for focused task notes, ~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/ for role-local notes, ~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/instances/<agent-instance>/ for reused agent-instance notes, and archive stale or superseded findings instead of replaying all history."
     "- Use a context retrieval ladder to save tokens: exact file or symbol search first, then targeted snippets, then full-file reads only for the files you will edit or directly depend on."
     "- Prefer surgical patches and modular edits: change only impacted ranges, keep stable prefixes for cache reuse, and avoid rewriting whole files when a targeted patch is sufficient."
+    "- Prefer small, reviewable patch batches, then re-read the touched code and rerun the narrowest proving validation before adding the next batch."
     "- Prefer modular structure: keep entrypoints thin, move named logic into focused files, and separate backend, API, frontend, workers, and tests when the project spans those concerns."
+    "- Do not stop at a workaround that merely appears to pass; confirm the root cause, implement the real fix, and avoid backward compatibility unless it was explicitly requested."
+    "- Keep committed comments and documentation professional, concise, and neutral; avoid first-person and second-person pronouns unless quoting user-provided or source material."
     "- Before finalizing non-trivial work, re-read the working brief, acceptance criteria, and touched files, then append a compact Learning Snapshot grounded in memory artifacts when available."
     "- Before the final answer, reconcile every explicit user requirement against current evidence and do not present unresolved work as complete."
     "- For non-trivial tasks, record explicit user requirements in the scoped completion ledger and rerun completion_gate.py check before the final answer; do not close the workstream while tracked requirements remain pending, in progress, or blocked without an honest blocker report."
@@ -813,11 +817,11 @@ if not isinstance(agent_payload, dict):
     )
 
 changed = False
-if agent_payload.get("model") != "gpt-5.3-codex-spark":
-    agent_payload["model"] = "gpt-5.3-codex-spark"
+if agent_payload.get("model") != "gpt-5.4":
+    agent_payload["model"] = "gpt-5.4"
     changed = True
-if agent_payload.get("reasoning_effort") != "high":
-    agent_payload["reasoning_effort"] = "high"
+if agent_payload.get("reasoning_effort") != "low":
+    agent_payload["reasoning_effort"] = "low"
     changed = True
 
 payload["memory-status-reporter"] = agent_payload
@@ -1673,8 +1677,10 @@ verify_pack_checksums() {
         return 1
     fi
 
-    run_task_line "verify root files" verify_root_file_checksum "AGENTS.md" || failed=1
-    run_task_line "verify root routing" verify_root_file_checksum "00-skill-routing-and-escalation.md" || failed=1
+    while IFS= read -r root_guidance_relative_path; do
+        [[ -n "$root_guidance_relative_path" ]] || continue
+        run_task_line "verify $root_guidance_relative_path" verify_root_file_checksum "$root_guidance_relative_path" || failed=1
+    done < <(list_root_guidance_relative_paths)
 
     while IFS= read -r agent_profile_name; do
         [[ -n "$agent_profile_name" ]] || continue
@@ -2155,6 +2161,16 @@ validate_codex_skill_dir() {
                 return 1
             fi
             ;;
+        cloud-and-devops-expert)
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Deployment Stage and Adversarial Readiness" "alpha" "beta" "canary" "release" "blue-green" "load-balancer traffic shifting" "red-team" "blue-team"; then
+                print_error "Cloud-and-devops-expert skill is missing staged-rollout or adversarial-readiness doctrine"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Production Gates" "Stage Gate" "Evidence Gate"; then
+                print_error "Cloud-and-devops-expert skill is missing rollout stage or evidence gates"
+                return 1
+            fi
+            ;;
         git-expert)
             if markdown_section_content "$skill_dir/SKILL.md" "Essential Git Commands" | grep -Eq 'git rebase -i|git reset --hard|git checkout -- <file>|git filter-branch'; then
                 print_error "Git skill keeps high-risk commands inside Essential Git Commands"
@@ -2162,6 +2178,10 @@ validate_codex_skill_dir() {
             fi
             if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "High-Risk Operations \(Explicit User Approval Only\)" "explicit user approval" "git reset --hard" "git rebase -i"; then
                 print_error "Git skill is missing explicit high-risk operation gating"
+                return 1
+            fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Issue-Driven Worktree Flow" "git worktree add" "clean" "CI and CD" "sensitive"; then
+                print_error "Git skill is missing issue-driven worktree, clean-push, or CI/CD workflow doctrine"
                 return 1
             fi
             ;;
@@ -2233,6 +2253,15 @@ validate_codex_agent_config() {
             print_error "Reviewer-family prompts must stay review-first and non-mutating by default: $home_agent_name"
             return 1
         fi
+        if ! grep -q "named surface" "$config_file" || ! grep -q "validated patch batches" "$config_file" || ! grep -q "workaround-only" "$config_file"; then
+            print_error "Reviewer-family prompts must keep named-scope, patch-batch, and root-cause discipline explicit: $home_agent_name"
+            return 1
+        fi
+    fi
+
+    if [[ "$skill_name" == "software-development-life-cycle" ]] && { ! grep -q "named scope" "$config_file" || ! grep -q "patch batch" "$config_file"; }; then
+        print_error "SDLC prompt must keep named-scope and patch-batch doctrine explicit: $skill_name"
+        return 1
     fi
 
     if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && ! grep -q "design intelligence packet" "$config_file"; then
@@ -2250,6 +2279,16 @@ validate_codex_agent_config() {
         return 1
     fi
 
+    if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && { ! grep -q "Benchmark 2-3 mature product-family surfaces" "$config_file" || ! grep -q "brownfield changes targeted" "$config_file"; }; then
+        print_error "UI skill prompt must keep benchmarking and targeted brownfield guidance explicit: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "ui-design-systems-and-responsive-interfaces" ]] && { ! grep -q "hardcoded design values" "$config_file" || ! grep -q "implementation-ready" "$config_file"; }; then
+        print_error "UI skill prompt must keep anti-hardcoding and implementation-ready guidance explicit: $skill_name"
+        return 1
+    fi
+
     if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && ! grep -q "experience brief" "$config_file"; then
         print_error "UX skill prompt must require experience-brief hardening: $skill_name"
         return 1
@@ -2260,6 +2299,16 @@ validate_codex_agent_config() {
         return 1
     fi
 
+    if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && { ! grep -q "Benchmark 2-3 mature flows" "$config_file" || ! grep -q "brownfield changes targeted" "$config_file"; }; then
+        print_error "UX skill prompt must keep benchmarking and targeted brownfield guidance explicit: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "ux-research-and-experience-strategy" ]] && { ! grep -q "completion note" "$config_file" || ! grep -q "live testing" "$config_file"; }; then
+        print_error "UX prompt must keep completion-note and live-testing residue guidance explicit: $skill_name"
+        return 1
+    fi
+
     if [[ "$skill_name" == "memory-status-reporter" ]] && { ! grep -q "tool-use mistakes" "$config_file" || ! grep -q "patterns were rewarded" "$config_file" || ! grep -q "research-cache items look stale" "$config_file" || ! grep -q "act as the memory writer" "$config_file" || ! grep -q "report what changed" "$config_file" || ! grep -q "verify the touched memory files are clean and in sync" "$config_file"; }; then
         print_error "Memory status prompt must mention tool-use mistakes, rewarded patterns, research cache health, and memory-writer reporting: $skill_name"
         return 1
@@ -2267,6 +2316,16 @@ validate_codex_agent_config() {
 
     if [[ "$skill_name" == "git-expert" ]] && { ! grep -q "configured Git author identity" "$config_file" || ! grep -q "git config user.name" "$config_file" || ! grep -q "git config user.email" "$config_file"; }; then
         print_error "Git prompt must preserve configured Git author identity: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "git-expert" ]] && { ! grep -q "issue-driven worktree" "$config_file" || ! grep -q "CI/CD-gated PRs" "$config_file" || ! grep -q "sensitive data leakage" "$config_file"; }; then
+        print_error "Git prompt must keep issue-driven worktree and clean-push doctrine explicit: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "cloud-and-devops-expert" ]] && { ! grep -q "alpha, beta, canary, release, or blue-green" "$config_file" || ! grep -q "load-balancer behavior" "$config_file" || ! grep -q "red-team versus blue-team" "$config_file" || ! grep -q "rollback owner" "$config_file" || ! grep -q "abort signal" "$config_file"; }; then
+        print_error "Cloud prompt must keep staged rollout and adversarial-readiness doctrine explicit: $skill_name"
         return 1
     fi
 
@@ -2379,6 +2438,11 @@ validate_codex_guidance_file() {
             return 1
         fi
 
+        if ! grep -qi "Named Scope First" "$file" || ! grep -qi "small, batch-sized patches" "$file" || ! grep -qi "fake completion or workaround-only delivery" "$file" || ! grep -qi "Avoid first-person and second-person pronouns" "$file"; then
+            print_error "Missing named-scope, small-batch, real-fix, or professional-language policy in AGENTS.md"
+            return 1
+        fi
+
         if ! grep -qi "Extend an existing entrypoint, installer, updater, or wrapper before adding a new one" "$file" || ! grep -qi "Keep one obvious install or update path per platform" "$file"; then
             print_error "Missing anti-junk entrypoint and duplicate-wrapper policy in AGENTS.md"
             return 1
@@ -2394,7 +2458,7 @@ validate_codex_guidance_file() {
             return 1
         fi
 
-       if ! grep -qi "Do not pin a specific model inside ordinary root Codex" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "gpt-5.3-codex-spark" "$file" || ! grep -qi 'reasoning_effort: "high"' "$file" || ! grep -qi "cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly" "$file"; then
+       if ! grep -qi "Do not pin a specific model inside ordinary root Codex" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "gpt-5.4" "$file" || ! grep -qi 'reasoning_effort: "low"' "$file" || ! grep -qi "cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly" "$file"; then
            print_error "Missing model-split, local-override, or runtime model-selection boundary policy in AGENTS.md"
            return 1
        fi
@@ -2406,6 +2470,10 @@ validate_codex_guidance_file() {
 
         if ! grep -qi "every explicit user requirement" "$file" || ! grep -qi "Do not present unresolved work as complete" "$file" || ! grep -qi "does not suspend execution when fixable in-scope work remains" "$file" || ! grep -qi "do not stay solo by default" "$file" || ! grep -qi "one top-level plan item per explicit user task" "$file" || ! grep -qi "per-item breakdown" "$file"; then
             print_error "Missing completion reconciliation or no-soft-stop enforcement in AGENTS.md"
+            return 1
+        fi
+        if ! grep -qi "Never hardcode runtime values" "$file" || ! grep -qi "Hold the final output until the closing check is explicit" "$file" || ! grep -qi "staged rollout doctrine" "$file" || ! grep -qi "generic-looking UI repair" "$file" || ! grep -qi "journey friction" "$file"; then
+            print_error "Missing hardcoding, final-hold, cloud rollout, or UI/UX routing doctrine in AGENTS.md"
             return 1
         fi
         if ! grep -qi "WAL Protocol" "$file" || ! grep -qi "SESSION-STATE.md" "$file" || ! grep -qi "working-buffer.md" "$file" || ! grep -qi "Trim Protocol" "$file" || ! grep -qi "recalibrate" "$file" || ! grep -qi "Prompt Injection Defense" "$file" || ! grep -qi "External Content Security" "$file" || ! grep -qi "Cross-Platform Script Portability" "$file" || ! grep -qi "Parallel Main-Agent Throughput" "$file"; then
@@ -2431,11 +2499,23 @@ validate_codex_guidance_file() {
             print_error "Missing skill-agent-profile mirror documentation in README.md"
             return 1
         fi
+        if ! grep -qi "Pair UI Output With UX Evidence" "$file" || ! grep -qi "issue-driven worktree" "$file" || ! grep -qi "Hold the answer until closure is proven" "$file"; then
+            print_error "Missing README parity for UI/UX, Git workflow, or completion proof doctrine"
+            return 1
+        fi
+        if ! grep -qi "Honor the named scope" "$file" || ! grep -qi "Small validated batches" "$file" || ! grep -qi "handoff packets small, scope-true, and validation-aware" "$file"; then
+            print_error "Missing named-scope, small-batch, or handoff-packet discipline in README.md"
+            return 1
+        fi
    fi
 
     if [[ "$(basename "$file")" == "00-skill-routing-and-escalation.md" ]]; then
         if ! grep -qi "Reuse Fresh Research First" "$file" || ! grep -qi "Fix The Next Bug Too" "$file" || ! grep -qi "Requirement Reconciliation Before Close" "$file" || ! grep -qi "Status Requests Do Not End The Job" "$file" || ! grep -qi "Write Corrections Before Responding" "$file" || ! grep -qi "Resolve workspace-scoped memory first" "$file" || ! grep -qi "agent-instance lane" "$file" || ! grep -qi "Use Solo Mode Deliberately" "$file" || ! grep -qi "Planning Defaults" "$file" || ! grep -qi "memory-status-reporter" "$file" || ! grep -qi "report what changed" "$file"; then
             print_error "Missing cache-first, no-soft-stop, WAL, autonomy, or delegated-memory routing defaults in 00-skill-routing-and-escalation.md"
+            return 1
+        fi
+        if ! grep -qi "Honor The Named Scope First" "$file" || ! grep -qi "Small Validated Batches Beat Huge Rewrites" "$file" || ! grep -qi "Real Solutions Over Plausible Workarounds" "$file" || ! grep -qi "Anchor handoffs to the user story and named scope" "$file"; then
+            print_error "Missing named-scope, small-batch, real-solution, or handoff-anchor policy in 00-skill-routing-and-escalation.md"
             return 1
         fi
     fi
@@ -2539,6 +2619,7 @@ validate_codex_repo_docs() {
 
 run_repo_contract_tests() {
     ensure_python_launcher || return 1
+    local requested_contract_test_workers="${CODEX_CONTRACT_TEST_WORKERS:-}"
 
     run_python -m py_compile \
         "$CODEX_SOURCE/memory-status-reporter/scripts/memory_store.py" \
@@ -2550,16 +2631,22 @@ run_repo_contract_tests() {
         "$CODEX_SOURCE/memory-status-reporter/scripts/agent_registry.py" \
         "$CODEX_SOURCE/memory-status-reporter/scripts/agent_packets.py" \
         "$CODEX_SOURCE/memory-status-reporter/scripts/loop_guard.py" \
+        "$CODEX_SOURCE/tests/parallel_contract_test_runner.py" \
         "$CODEX_SOURCE/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py" \
         "$CODEX_SOURCE/tests/test_skill_pack_contracts.py" || return 1
 
-    (
-        cd "$CODEX_SOURCE" || exit 1
-        run_python -m unittest \
-            ui-design-systems-and-responsive-interfaces/tests/test_design_intelligence.py \
-            tests/test_skill_pack_contracts.py
-    )
+    if [[ -n "$requested_contract_test_workers" ]]; then
+        run_python "$CODEX_SOURCE/tests/parallel_contract_test_runner.py" --workers "$requested_contract_test_workers"
+        return $?
+    fi
+
+    run_python "$CODEX_SOURCE/tests/parallel_contract_test_runner.py"
 }
+
+validate_should_skip_contract_tests() {
+    [[ "${CODEX_SKIP_VALIDATE_CONTRACT_TESTS:-0}" == "1" ]] && [[ "${CODEX_SKIP_VALIDATE_SMOKE:-0}" == "1" ]]
+}
+
 extract_codex_openai_value() {
     local openai_yaml_path=$1
     local field_name=$2
@@ -2605,59 +2692,120 @@ write_codex_agent_toml() {
     local target_toml_path=$2
     local home_agent_name=$3
     local sync_mode=$4
+    local override_file
 
     if [[ ! -f "$openai_yaml_path" ]]; then
         print_warning "Skipping $sync_mode sync for $home_agent_name because $openai_yaml_path is missing"
         return 0
     fi
 
-    local default_prompt
-    local pinned_model
-    local configured_reasoning
-    local local_override_model
-    local local_override_reasoning
-    local effective_model=""
-    local effective_reasoning=""
-    default_prompt=$(extract_codex_openai_value "$openai_yaml_path" "default_prompt") || {
-        print_error "Unable to extract default_prompt for $home_agent_name"
-        return 1
-    }
-    pinned_model="$(extract_codex_openai_optional_value "$openai_yaml_path" "model")"
-    configured_reasoning="$(extract_codex_openai_optional_value "$openai_yaml_path" "reasoning_effort")"
-    local_override_model="$(read_local_home_agent_override_value "$home_agent_name" "model")" || {
-        print_error "Unable to read local model override for $home_agent_name"
-        return 1
-    }
-    local_override_reasoning="$(read_local_home_agent_override_value "$home_agent_name" "reasoning_effort")" || {
-        print_error "Unable to read local reasoning override for $home_agent_name"
-        return 1
-    }
+    override_file="$(skill_manager_local_home_agent_override_file)"
 
-    if [[ -n "$local_override_model" ]]; then
-        effective_model="$local_override_model"
-    else
-        effective_model="$pinned_model"
-    fi
-
-    if [[ -n "$local_override_reasoning" ]]; then
-        effective_reasoning="$local_override_reasoning"
-    elif [[ "$sync_mode" == "agent-profile" ]] && [[ -n "$configured_reasoning" ]]; then
-        effective_reasoning="$configured_reasoning"
-    elif [[ -n "$pinned_model" ]] && [[ -n "$configured_reasoning" ]]; then
-        effective_reasoning="$configured_reasoning"
-    fi
-
-    run_python - "$target_toml_path" "$default_prompt" "$effective_model" "$effective_reasoning" <<'PY'
+    run_python - "$openai_yaml_path" "$target_toml_path" "$home_agent_name" "$sync_mode" "$override_file" <<'PY'
 from pathlib import Path
+import json
+import re
 import sys
 
-target_toml_path = Path(sys.argv[1])
-default_prompt = sys.argv[2]
-effective_model = sys.argv[3]
-effective_reasoning = sys.argv[4]
+openai_yaml_path = Path(sys.argv[1])
+target_toml_path = Path(sys.argv[2])
+home_agent_name = sys.argv[3]
+sync_mode = sys.argv[4]
+override_file = Path(sys.argv[5])
+
+openai_yaml_text = openai_yaml_path.read_text(encoding="utf-8")
+field_patterns = {
+    "model": r'^model:\s*(".*")\s*$',
+    "reasoning_effort": r'^reasoning_effort:\s*(".*")\s*$',
+    "default_prompt": r'^\s+default_prompt:\s*(".*")\s*$',
+}
+
+def extract_field(field_name: str, required: bool) -> str:
+    field_pattern = field_patterns[field_name]
+    field_match = re.search(field_pattern, openai_yaml_text, flags=re.MULTILINE)
+    if field_match is None:
+        if required:
+            raise SystemExit(f"Missing {field_name} in {openai_yaml_path}")
+        return ""
+    return json.loads(field_match.group(1))
+
+default_prompt = extract_field("default_prompt", required=True)
+pinned_model = extract_field("model", required=False)
+configured_reasoning = extract_field("reasoning_effort", required=False)
+default_managed_model = "gpt-5.4"
+default_managed_reasoning = "medium"
+shared_execution_lines = [
+    "Do not call tools directly in this runtime; route all tool work through js_repl with codex.tool(...).",
+    "Before fresh live research on a reusable question, run research_cache.py lookup or an equivalent shared cache check and only browse live for missing, stale, uncertain, or time-sensitive gaps.",
+    "If the request names a function, module, route, or script, keep the first implementation pass anchored to that named scope and widen only when traced impact proves it is required.",
+    "Prefer small, reviewable patch batches, then re-read the touched code and rerun the narrowest proving validation before adding the next batch.",
+    "Do not stop at a workaround that merely appears to pass; confirm the root cause, implement the real fix, and avoid backward compatibility unless it was explicitly requested.",
+    "Keep committed comments and documentation professional, concise, and neutral; avoid first-person and second-person pronouns unless quoting user-provided or source material.",
+    "For non-trivial tasks, keep the scoped completion ledger current and rerun completion_gate.py check before the final answer.",
+    "If a required sub-agent is still running after wait times out, continue non-conflicting local work and wait again until terminal state before finalizing.",
+]
+
+if override_file.exists():
+    try:
+        payload = json.loads(override_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Invalid local home-agent override file {override_file}: {exc}")
+    if not isinstance(payload, dict):
+        raise SystemExit(f"Local home-agent override file must contain a JSON object: {override_file}")
+else:
+    payload = {}
+
+if home_agent_name == "memory-status-reporter":
+    agent_payload = payload.get(home_agent_name, {})
+else:
+    agent_payload = {}
+if agent_payload is None:
+    agent_payload = {}
+if not isinstance(agent_payload, dict):
+    raise SystemExit(
+        f"Local home-agent override entry for {home_agent_name} must be a JSON object: {override_file}"
+    )
+
+local_override_model = agent_payload.get("model", "")
+local_override_reasoning = agent_payload.get("reasoning_effort", "")
+for field_name, value in {
+    "model": local_override_model,
+    "reasoning_effort": local_override_reasoning,
+}.items():
+    if value is None:
+        value = ""
+    if value != "" and not isinstance(value, str):
+        raise SystemExit(
+            f"Local home-agent override field {field_name!r} for {home_agent_name} must be a string"
+        )
+    if field_name == "model":
+        local_override_model = value
+    else:
+        local_override_reasoning = value
+
+if local_override_model:
+    effective_model = local_override_model
+elif pinned_model:
+    effective_model = pinned_model
+else:
+    effective_model = default_managed_model
+
+if local_override_reasoning:
+    effective_reasoning = local_override_reasoning
+elif configured_reasoning:
+    effective_reasoning = configured_reasoning
+else:
+    effective_reasoning = default_managed_reasoning
 
 if "'''" in default_prompt:
     raise SystemExit("Triple single quotes are not supported inside developer_instructions")
+
+missing_execution_lines = [line for line in shared_execution_lines if line not in default_prompt]
+if missing_execution_lines:
+    execution_policy_block = "\n\nExecution policy:\n" + "\n".join(
+        f"- {line}" for line in missing_execution_lines
+    )
+    default_prompt = default_prompt.rstrip() + execution_policy_block
 
 target_toml_path.parent.mkdir(parents=True, exist_ok=True)
 output_lines = []
@@ -2854,17 +3002,33 @@ ensure_memory_hygiene_layout() {
 }
 
 sync_root_guidance_files() {
-    if [[ -f "$CODEX_SOURCE/AGENTS.md" ]]; then
-        cp "$CODEX_SOURCE/AGENTS.md" "$CODEX_TARGET/AGENTS.md"
-        print_success "Synced AGENTS.md to Codex"
-    else
-        print_warning "AGENTS.md not found in source"
-    fi
+    local relative_path
+    local source_path
+    local target_path
 
-    if [[ -f "$CODEX_SOURCE/00-skill-routing-and-escalation.md" ]]; then
-        cp "$CODEX_SOURCE/00-skill-routing-and-escalation.md" "$CODEX_TARGET/00-skill-routing-and-escalation.md"
-        print_success "Synced skill routing to Codex"
-    fi
+    while IFS= read -r relative_path; do
+        [[ -n "$relative_path" ]] || continue
+        source_path="$CODEX_SOURCE/$relative_path"
+        target_path="$CODEX_TARGET/$relative_path"
+
+        if [[ -f "$source_path" ]]; then
+            mkdir -p "$(dirname "$target_path")"
+            cp "$source_path" "$target_path"
+            print_success "Synced $relative_path to Codex"
+        else
+            print_warning "$relative_path not found in source"
+        fi
+    done < <(list_root_guidance_relative_paths)
+}
+
+list_root_guidance_relative_paths() {
+    cat <<'EOF'
+AGENTS.md
+00-skill-routing-and-escalation.md
+docs/runtime-guardrails-and-memory-protocols.md
+docs/open-source-memory-patterns.md
+docs/security-audit-status.md
+EOF
 }
 
 sync_skill_to_codex() {
@@ -3007,6 +3171,14 @@ sync_codex_delta_update() {
         fi
     fi
 
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        if ! sync_codex_home_agents_for_skill "$skill_name"; then
+            print_error "Failed to refresh $skill_name home agent config"
+            return 1
+        fi
+    done < <(list_repo_skill_names)
+
     if ! prune_repo_managed_installation_noise; then
         print_error "Failed to prune managed install noise"
         return 1
@@ -3038,7 +3210,11 @@ validate_all() {
         ((failed+=1))
     done < <(collect_failed_skill_names_parallel)
 
-    run_task_line "contract tests" run_repo_contract_tests || ((failed+=1))
+    if validate_should_skip_contract_tests; then
+        print_info "Skipping nested contract suite because CODEX_SKIP_VALIDATE_CONTRACT_TESTS=1"
+    else
+        run_task_line "contract tests" run_repo_contract_tests || ((failed+=1))
+    fi
 
     if [[ $failed -eq 0 ]]; then
         print_success "All skills validated successfully"
@@ -3175,7 +3351,8 @@ core_files_need_update() {
 root_guidance_files_need_update() {
     local relative_path
 
-    for relative_path in "AGENTS.md" "00-skill-routing-and-escalation.md"; do
+    while IFS= read -r relative_path; do
+        [[ -n "$relative_path" ]] || continue
         local source_path="$CODEX_SOURCE/$relative_path"
         local target_path="$CODEX_TARGET/$relative_path"
 
@@ -3186,7 +3363,7 @@ root_guidance_files_need_update() {
         if [[ "$(md5_for_file "$source_path")" != "$(md5_for_file "$target_path")" ]]; then
             return 0
         fi
-    done
+    done < <(list_root_guidance_relative_paths)
 
     return 1
 }
@@ -3765,8 +3942,9 @@ show_status() {
     local codex_source_count=0
     local codex_synced_count=0
    local codex_home_agent_total=0
-   local codex_home_agent_inheriting=0
-   local codex_home_agent_overrides=()
+   local codex_home_agent_explicit=0
+   local codex_home_agent_medium=0
+   local codex_home_agent_non_medium=()
     local codex_agent_profile_total=0
     local codex_agent_profile_synced=0
     local codex_agent_profile_medium=0
@@ -3785,13 +3963,16 @@ show_status() {
                home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
                local home_agent_file="$CODEX_TARGET/agents/$home_agent_name.toml"
                 local agent_profile_file="$CODEX_TARGET/agent-profiles/$home_agent_name.toml"
-                ((codex_agent_profile_total+=1))
+               ((codex_agent_profile_total+=1))
                if [[ -f "$home_agent_file" ]]; then
                    ((codex_home_agent_total+=1))
-                   if ! grep -qE '^(model|model_reasoning_effort) =' "$home_agent_file"; then
-                       ((codex_home_agent_inheriting+=1))
+                   if grep -q '^model = "gpt-5.4"$' "$home_agent_file" && grep -q '^model_reasoning_effort =' "$home_agent_file"; then
+                       ((codex_home_agent_explicit+=1))
+                   fi
+                   if grep -q '^model_reasoning_effort = "medium"$' "$home_agent_file"; then
+                       ((codex_home_agent_medium+=1))
                    else
-                       codex_home_agent_overrides+=("$home_agent_name")
+                       codex_home_agent_non_medium+=("$home_agent_name")
                    fi
                fi
                 if [[ -f "$agent_profile_file" ]]; then
@@ -3848,13 +4029,14 @@ show_status() {
     fi
 
     if [[ $codex_home_agent_total -gt 0 ]]; then
-        if [[ ${#codex_home_agent_overrides[@]} -gt 0 ]]; then
-            echo "  agent inheritance: $codex_home_agent_inheriting/$codex_home_agent_total (explicit overrides: ${codex_home_agent_overrides[*]})"
-        else
-            echo "  agent inheritance: $codex_home_agent_inheriting/$codex_home_agent_total"
+        echo "  agent explicit wiring: $codex_home_agent_explicit/$codex_home_agent_total"
+        echo "  agent medium baseline: $codex_home_agent_medium/$codex_home_agent_total"
+        if [[ ${#codex_home_agent_non_medium[@]} -gt 0 ]]; then
+            echo "  agent non-medium overrides: ${codex_home_agent_non_medium[*]}"
         fi
     else
-        echo "  agent inheritance: 0/0"
+        echo "  agent explicit wiring: 0/0"
+        echo "  agent medium baseline: 0/0"
     fi
 
     echo ""

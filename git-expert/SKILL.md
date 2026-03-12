@@ -56,6 +56,23 @@ git push origin feature/new-feature
 # Create pull request (via GitHub/GitLab UI or CLI)
 ```
 
+### Issue-Driven Worktree Flow
+
+Use one narrow lane per issue or feature so review, validation, and rollback stay easy to reason about:
+- Start from an issue, ticket, or written task ID before creating the branch so the scope is explicit.
+- Prefer one `git worktree` per active issue or feature instead of stacking unrelated work on one checkout.
+- Keep the branch feature-by-feature: one user story, one reviewable PR, one validation packet.
+- Run the narrowest proving validation before push, then let CI and CD gates decide promotion beyond local checks.
+- Keep every push clean: stage only intended files, exclude generated secrets or sensitive data, and avoid unrelated churn.
+
+Example:
+```bash
+git fetch origin
+git worktree add ../repo-issue-123 -b feature/issue-123 origin/main
+cd ../repo-issue-123
+git status
+```
+
 ### Branching Strategy
 - **main/master**: Production-ready code
 - **develop**: Integration branch (optional)
@@ -227,6 +244,7 @@ Prefer reversible alternatives such as `git revert`, backup branches or tags, an
 2. **Create PR**: Via GitHub/GitLab UI or CLI (`gh pr create`)
 3. **Description**: Clear title, detailed description, link issues
 4. **Request Review**: Tag reviewers
+5. **Require CI/CD Evidence**: Do not merge until the required checks are green or the exception is explicitly approved and documented
 
 ### Updating PR
 ```bash
@@ -301,6 +319,12 @@ git branch -d <branch>      # Delete merged branch
 git remote prune origin     # Remove stale remote branches
 git gc                      # Garbage collection
 ```
+
+### Clean Push Hygiene
+- Verify the diff matches the linked issue or named task before `git push`.
+- Confirm generated files, lockfile churn, fixtures, and snapshots are intentional instead of accidental spillover.
+- Reject pushes that include secrets, credentials, tokens, private keys, `.env` files, customer data, or other sensitive material.
+- Keep CI or CD noise out of the branch unless the task explicitly asked for pipeline changes.
 
 ## Git Configuration
 
@@ -436,9 +460,10 @@ When running commands on Windows:
 5. **Review Before Merge**: Code review catches issues
 6. **Test Before Commit**: Don't break the build
 7. **Keep History Clean**: Rebase local branches, squash when appropriate
-8. **Never Force Push Shared Branches**: Use `--force-with-lease` carefully
-9. **Protect Secrets**: Never commit credentials
-10. **Document Workflow**: Team conventions in README
+8. **Prefer Worktrees For Parallel Features**: Keep issue lanes isolated instead of stacking unrelated changes
+9. **Never Force Push Shared Branches**: Use `--force-with-lease` carefully
+10. **Protect Secrets**: Never commit credentials
+11. **Document Workflow**: Team conventions in README
 
 ## Safety Rules
 
@@ -460,10 +485,13 @@ When running commands on Windows:
 ## Final Checklist
 
 Before completing Git operations:
+- [ ] Issue or task scope is identified and the branch stays feature-by-feature
+- [ ] Worktree isolation is used when parallel issue lanes would otherwise collide
 - [ ] Changes staged are correct and complete
 - [ ] Commit message is clear and descriptive
 - [ ] No secrets or sensitive data included
 - [ ] Tests pass (if applicable)
 - [ ] Branch is up to date with target
+- [ ] Required CI/CD checks are green or the exception is explicitly approved
 - [ ] User has confirmed destructive operations
 - [ ] Rollback plan exists for risky operations

@@ -73,7 +73,7 @@ Required flow:
    - Windows: download `sync-skills.ps1`, then run `powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install`
 3. If the repo is already present, use the normal repo-managed `sync-skills.sh` or `sync-skills.ps1` entrypoint there.
 4. After install, run `status`.
- 5. Tell me whether repo version, installed version, memory-status-reporter wiring, skill agent profiles, agent inheritance, and MD5 verification all pass.
+ 5. Tell me whether repo version, installed version, memory-status-reporter wiring, skill agent profiles, explicit agent wiring, and MD5 verification all pass.
 
 If anything fails:
 - identify the exact failing step,
@@ -245,9 +245,9 @@ Located in root directories (12 skill directories total).
 5. **cloud-and-devops-expert** - Infrastructure, CI/CD, release reliability, observability
 6. **qa-and-automation-engineer** - Test strategy, regression coverage, automation
 7. **security-and-compliance-auditor** - Threat modeling, secrets, remediation, compliance
-8. **ui-design-systems-and-responsive-interfaces** - Design systems, accessibility, visual execution
-9. **ux-research-and-experience-strategy** - UX framing, jobs-to-be-done, usability strategy
-10. **git-expert** - Repository-state safety, branching, recovery, review handoff
+8. **ui-design-systems-and-responsive-interfaces** - Design systems, accessibility, visual execution, brownfield fidelity, and generic-looking UI repair
+9. **ux-research-and-experience-strategy** - UX framing, jobs-to-be-done, usability strategy, journey friction, and recovery-path quality
+10. **git-expert** - Repository-state safety, issue-driven worktree delivery, clean push hygiene, and review handoff
 11. **memory-status-reporter** - Daily learnings, mistake ledgers, tool-mistake tracking, heuristic memory-health reporting, and delegated durable memory writes
 12. **reviewer** - Production readiness, quality gates, DRY enforcement, and final validation
 
@@ -291,9 +291,9 @@ The sync does all of the following:
 - copies `AGENTS.md` and `00-skill-routing-and-escalation.md` into `~/.codex/`
 - refreshes `~/.codex/agents/*.toml` from each root `agents/openai.yaml`
 - mirrors those 12 skill-owned agents into `~/.codex/agent-profiles/*.toml` so `reviewer`, `memory-status-reporter`, and the other specialist lanes are available as full agent profiles with the same skill instructions attached
-- keeps repo-managed specialist skills on the repo baseline of `reasoning_effort: "medium"` instead of mirroring the main-agent slow lane in source
+- keeps repo-managed specialist skills on the repo baseline of `gpt-5.4` with `reasoning_effort: "medium"` in generated home-agent and agent-profile TOMLs instead of mirroring the main-agent slow lane
 - keeps `~/.codex/config.toml` wired for `memory-status-reporter`
-- seeds and preserves `~/.codex/.codex-skill-manager/local-home-agent-overrides.json` for the bounded `memory-status-reporter` fast helper lane (`gpt-5.3-codex-spark` + `high`) while still keeping model overrides local to the user home
+- seeds and preserves `~/.codex/.codex-skill-manager/local-home-agent-overrides.json` for the bounded `memory-status-reporter` helper lane (`gpt-5.4` + `low`) while still keeping model overrides local to the user home
 - writes install metadata with the current repo version
 - tracks the repo-managed installed skill set for update and uninstall safety
 - compares source and installed files with MD5 checksums after sync
@@ -301,6 +301,16 @@ The sync does all of the following:
 - prunes runtime-noise artifacts from managed installs in `~/.codex`, including `tests/`, `.pytest_cache/`, `__pycache__/`, `*.pyc`, and `*.pyo`
 - applies delta updates by refreshing changed repo-managed skills, updating changed root guidance files, and pruning repo-managed skills that disappeared from the source tree
 - injects shared execution-policy lines for working briefs, context efficiency, modular structure, surgical patches, compact learning snapshots, and freshness-aware research reuse
+
+### Pair UI Output With UX Evidence
+
+Use the UI generator and the UX brief together so visual polish does not outrun flow quality:
+
+- start UI work with `design_intelligence.py` when the main problem is layout, component fidelity, responsive behavior, or visual genericness
+- start UX work with an experience brief when the main problem is journey friction, decision overload, recovery weakness, or mental-model mismatch
+- keep brownfield UI and UX changes targeted to the named scope instead of redesigning the full product by default
+- benchmark 2-3 mature products or flows in the same category, then state what should stay familiar versus what is intentionally improved
+- validate with component previews, browser or device checks, Storybook or equivalent, usability checks, or journey walkthroughs before calling the direction ready
 
 ### macOS and Linux
 
@@ -318,7 +328,7 @@ powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 update
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 uninstall
 ```
 
-Inside Codex runtime, route shell work through `js_repl` and `codex.tool("exec_command", ...)`:
+Inside Codex runtime, do not call tools directly. Route all tool work through `js_repl` and `codex.tool(...)`, including shell commands:
 
 ```javascript
 await codex.tool("exec_command", {
@@ -339,8 +349,11 @@ This repo now treats context efficiency like a product requirement.
 3. **Exact retrieval first** — use file, symbol, or keyword search before broad reads
 4. **Targeted reads second** — inspect only the relevant snippets, callers, callees, and direct dependencies
 5. **Full reads only for edit scope** — fully read only files you will edit or that directly drive the change
-6. **Surgical patching** — change only the impacted ranges instead of rewriting whole files
-7. **Final re-read** — re-read the working brief plus touched files before validating or answering
+6. **Honor the named scope** — if the request names a function, module, route, or script, keep the first implementation pass anchored there and widen only when traced impact proves it is required
+7. **Surgical patching** — change only the impacted ranges instead of rewriting whole files
+8. **Small validated batches** — prefer small, reviewable patch batches, then re-read the touched code and rerun the narrowest proving validation before adding the next batch
+9. **Final re-read** — re-read the working brief plus touched files before validating or answering
+10. **Hold the answer until closure is proven** — confirm the requested tasks are done or honestly blocked, tests passed, coverage is adequate for the touched surface, and no partial implementation is being reported as complete
 
 ### Token-Saving Techniques
 
@@ -350,6 +363,7 @@ This repo now treats context efficiency like a product requirement.
 - use compact memory snapshots instead of pasting entire memory files
 - avoid regenerating unchanged code when a diff or narrow patch is enough
 - prefer modular files so future reads stay narrow and traceable
+- keep handoff packets small, scope-true, and validation-aware so sub-agents do not drift into unrelated code
 
 ### Research Summary
 
@@ -413,7 +427,7 @@ The repo now also ships memory-status-reporter/scripts/agent_registry.py so same
 
 ### Completion Reconciliation
 
-Before any final answer, the active skill should reconcile every explicit user requirement against current evidence. That means re-reading the raw request, mapping each concrete ask to code or validation, looping back for any in-scope gap, and avoiding optional follow-up language when the user asked for completion. For non-trivial tasks, the repo now expects a scoped completion ledger in `completion-gate.json` maintained through `completion_gate.py`, and closure should not be claimed until `check` reports that every tracked requirement is done. If something is blocked, record the blocker explicitly and keep looping until it is resolved or honestly reported as the reason the work is still not complete. A progress, recap, audit, or "what is done or not done" request is not permission to stop if fixable in-scope work remains.
+Before any final answer, the active skill should reconcile every explicit user requirement against current evidence. That means re-reading the raw request, mapping each concrete ask to code or validation, looping back for any in-scope gap, and avoiding optional follow-up language when the user asked for completion. For non-trivial tasks, the repo now expects a scoped completion ledger in `completion-gate.json` maintained through `completion_gate.py`, and closure should not be claimed until `check` reports that every tracked requirement is done. If something is blocked, record the blocker explicitly and keep looping until it is resolved or honestly reported as the reason the work is still not complete. Before the answer lands, explicitly check that requested tasks are done or honestly blocked, tests passed, coverage matches the touched risk surface, and partial implementation is not being presented as complete. A progress, recap, audit, or "what is done or not done" request is not permission to stop if fixable in-scope work remains.
 
 ### Open-Source Pattern Notes
 
@@ -513,6 +527,7 @@ The sync script validates:
 - YAML frontmatter and required metadata
 - root prompt/runtime guidance for Codex
 - same-role agent reuse and robust handoff wording
+- issue-driven worktree Git hygiene, staged rollout doctrine, and UI or UX quality-routing doctrine
 - UI/UX strengthening and memory tool-mistake wording
 - README and validation-report inventory parity
 - top-level guidance drift and Codex-home wiring
@@ -532,22 +547,22 @@ Run:
 
 Then verify `~/.codex/config.toml` contains the `memory-status-reporter` route line, the `memory-status-reporter` agent block, and the injected execution-policy lines for working briefs, context retrieval, surgical patching, modular structure, and learning snapshots.
 
- Also verify `./sync-skills.sh status` reports `skill agent profiles: 12/12`, `skill agent profile medium baseline: 11/12` or `12/12` depending on whether the local memory override is active, and the expected `memory-status-reporter` local override. In the current repo policy, repo-managed specialist skills stay at the repo baseline of `reasoning_effort: "medium"` in source, the synced `~/.codex/agent-profiles/*.toml` surface mirrors those 12 skill-owned lanes, and only the bounded `memory-status-reporter` fast lane should be promoted through `~/.codex/.codex-skill-manager/local-home-agent-overrides.json`.
+ Also verify `./sync-skills.sh status` reports `skill agent profiles: 12/12`, `skill agent profile medium baseline: 11/12` or `12/12` depending on whether the local memory override is active, and the expected `memory-status-reporter` local override. In the current repo policy, repo-managed specialist skills stay at the repo baseline of `reasoning_effort: "medium"` in source, the synced `~/.codex/agent-profiles/*.toml` surface mirrors those 12 skill-owned lanes, and only the bounded `memory-status-reporter` helper lane should be narrowed through `~/.codex/.codex-skill-manager/local-home-agent-overrides.json`.
 
 ### Optional fast-lane home-agent overrides
 
-Keep the repo policy simple by leaving root `agents/openai.yaml` files model-agnostic. If your local runtime actually exposes a faster bounded helper model, add a local override file instead:
+Keep the repo policy simple by leaving root `agents/openai.yaml` files model-agnostic. If you want the memory lane cheaper than the rest of the pack, add a local override file instead:
 
 ```json
 {
   "memory-status-reporter": {
-    "model": "gpt-5.3-codex-spark",
-    "reasoning_effort": "high"
+    "model": "gpt-5.4",
+    "reasoning_effort": "low"
   }
 }
 ```
 
- `sync-skills.sh install` and `sync-skills.sh update` now seed that file automatically for `memory-status-reporter` when it is missing or incomplete, while preserving unrelated local override entries. Use it only for bounded helper lanes such as memory writes, research-cache maintenance, completion-gate updates, file inventories, diff summaries, or small doc-only audits. Do not use it to repin the whole skill pack; the repo-managed `agent-profiles/*.toml` mirror already keeps the 12 specialist lanes aligned, while only `memory-status-reporter` should move to the Spark fast lane locally.
+ `sync-skills.sh install` and `sync-skills.sh update` now seed that file automatically for `memory-status-reporter` when it is missing or incomplete, while preserving unrelated local override entries. Use it only for bounded helper lanes such as memory writes, research-cache maintenance, completion-gate updates, file inventories, diff summaries, or small doc-only audits. Do not use it to repin the whole skill pack; the repo-managed `agent-profiles/*.toml` mirror already keeps the 12 specialist lanes aligned, while only `memory-status-reporter` should step down to the local `gpt-5.4` plus `low` helper lane.
 
 When durable memory needs to change, route that write through the `memory-status-reporter` lane, let it act as the memory writer, then verify the touched memory files are clean and in sync before closing the task.
 

@@ -70,6 +70,11 @@ Before proposing a visual direction, assemble a compact design intelligence pack
 
 Use this packet to recommend one strong default design system direction rather than a pile of disconnected aesthetics.
 
+Keep the packet implementation-ready:
+- name the primary task path the screen must support before styling details expand
+- include the key failure, empty, and recovery states that the visual system must support
+- reject hardcoded colors, spacing magic numbers, or breakpoint values when design tokens, component rules, or existing system constants should own them
+
 ## Product-Family and Familiarity Defaults
 
 When the user references an existing product family or benchmark:
@@ -101,6 +106,14 @@ When the prompt is vague or the current UI looks generic, infer a sharper visual
 
 The output should feel intentionally designed for the product category, not like a generic prompt template.
 
+## Flow Proof and Quality Checks
+
+Before calling a UI direction ready:
+- walk the primary task path and make sure the screen hierarchy keeps that path obvious
+- verify the failure, empty, loading, and recovery states are as deliberate as the happy path
+- confirm brownfield work stays targeted to the named screen, component family, or breakpoint instead of redesigning the full product by reflex
+- validate the recommendation in component previews, browser checks, real devices, or screenshot review before presenting it as implementation-ready
+
 ## Platform and Surface Defaults
 
 Adjust the recommendation to the actual surface instead of treating every request like a marketing landing page:
@@ -126,6 +139,7 @@ When producing UI guidance, provide concrete design direction rather than vague 
 - For continuity-heavy or stateful flows, specify the primary collection view, active workspace, input or control surface, state transitions, and failure-recovery behavior instead of treating the screen like a generic card layout.
 - Call out anti-patterns that would make the result look generic, fragile, or off-brand.
 - Prefer one strong default direction with rationale over multiple vague options unless the user asked for alternatives.
+- End with an implementation-ready summary that names what was validated, what still needs coded proof, and what should stay unchanged in a brownfield surface.
 
 ## UI Copy and Flow Defaults
 

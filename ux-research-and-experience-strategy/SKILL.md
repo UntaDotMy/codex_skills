@@ -59,6 +59,11 @@ Before proposing experience changes, build a concise experience brief:
 
 Use this brief to keep UX guidance concrete, measurable, and compatible with the real product context.
 
+Keep the brief implementation-ready:
+- anchor the brief to the named flow or user story before widening to adjacent journeys
+- state the smallest brownfield change that can remove the friction before proposing a broader redesign
+- reject hardcoded assumptions about user intent, rollout path, or fixed environment behavior when evidence or configuration should decide those details
+
 ## Experience Strategy Engine Defaults
 
 When a request is vague or the current flow feels weak, infer stronger UX strategy from the product context instead of offering generic advice:
@@ -71,6 +76,14 @@ When a request is vague or the current flow feels weak, infer stronger UX strate
 - benchmark against 2-3 mature products or service experiences in the same category and explain which interaction patterns are worth emulating
 
 The result should feel like a deliberate product strategy, not a generic UX checklist.
+
+## Experience Quality Proof
+
+Before calling a UX direction ready:
+- benchmark 2-3 mature flows in the same category and explain what should stay familiar
+- test the primary task path, first error state, and main recovery path in addition to the happy path
+- keep brownfield changes targeted to the named journey step, message, or decision point unless broader evidence proves the flow is broken
+- pair the recommendation with usability checks, journey walkthroughs, component previews, or experiment plans so the direction is implementation-ready instead of aspirational
 
 ## Product-Family and Familiarity Journey Defaults
 
@@ -112,6 +125,7 @@ When producing UX guidance, avoid vague recommendations and make the work implem
 - Call out what should remain stable in a brownfield flow so redesign energy stays focused on the real pain points.
 - For named product-family tasks or continuity-heavy workflows, describe the familiar mental model being preserved and the exact friction being removed.
 - Prefer one strong recommendation with rationale unless the user explicitly asks for multiple alternatives.
+- End with a completion note that says what was validated, what still needs live testing, and whether the recommendation is fully ready or still partial.
 
 ## Brownfield Redesign and Artifact Persistence
 

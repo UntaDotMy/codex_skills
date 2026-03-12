@@ -25,12 +25,12 @@ Load specialist skills when the task clearly requires domain expertise:
 - **web-development-life-cycle**: Web performance, SEO, browser compatibility
 - **mobile-development-life-cycle**: Mobile lifecycle, permissions, offline sync
 - **backend-and-data-architecture**: API design, database schemas, microservices, messaging
-- **cloud-and-devops-expert**: Infrastructure as Code, CI/CD pipelines, container orchestration
+- **cloud-and-devops-expert**: Infrastructure as Code, CI/CD pipelines, container orchestration, staged rollout doctrine, red-team and blue-team operations, and deployment evidence gates
 - **qa-and-automation-engineer**: Test automation, E2E frameworks, load testing
 - **security-and-compliance-auditor**: Vulnerability hunting, threat modeling, compliance
-- **ui-design-systems-and-responsive-interfaces**: Design systems, responsive UI
-- **ux-research-and-experience-strategy**: UX research, user testing
-- **git-expert**: Complex git operations, branching strategy
+- **ui-design-systems-and-responsive-interfaces**: Design systems, responsive UI, brownfield visual fidelity, component quality, and generic-looking UI repair
+- **ux-research-and-experience-strategy**: UX research, user testing, journey friction, decision architecture, and recovery-path quality
+- **git-expert**: Complex git operations, issue-driven worktree flow, branching strategy, and clean push hygiene
 - **memory-status-reporter**: Memory health, daily learnings, mistake ledgers, heuristic status reporting, and delegated durable memory writes
 
 ### Keep It Simple
@@ -170,6 +170,7 @@ The old generic `default`, `explorer`, `worker`, `architect`, and `awaiter` TOML
 - When work crosses layers, sample one representative file per layer first (for example route/controller, service, repository, page/component, and test) before widening the read set.
 - Read entire files only for files you will edit or directly depend on.
 - Prefer summaries, inventories, and compact notes over repeated broad rereads.
+- When the request names a specific surface such as a function, module, route, or script, keep the first pass anchored to that named scope and widen only when traced dependencies prove the scope must expand.
 - Re-read the working brief and touched files before the final patch, test run, or handoff.
 
 **Exit criteria:**
@@ -286,6 +287,7 @@ MANDATORY ANALYSIS STEPS:
 - Only requested features (no scope creep)
 - Clean updates (delete old code)
 - DRY (reuse existing code)
+- Never hardcode runtime values, environment-specific paths, thresholds, endpoints, rollout settings, or credentials when configuration, derivation, or existing constants should own them
 - Based on impact analysis from previous loop
 
 **Exit criteria:**
@@ -382,6 +384,7 @@ REPEAT UNTIL CLEAN:
 - Enumerate every explicit user requirement, complaint, acceptance criterion, and correction that appeared in the turn.
 - For non-trivial tasks, record those explicit requirements in the scoped completion ledger with `memory-status-reporter/scripts/completion_gate.py`, keep the ledger current as work progresses, and rerun `check` before closing.
 - Map each one to concrete code, docs, validation, or a verified blocker.
+- Hold the final output until the closing check is explicit: every requested task is done or honestly blocked, tests and validation targets passed, coverage is adequate for the touched risk surface, and no partial implementation is being presented as complete.
 - If any explicit requirement is still unresolved and is fixable in scope, loop back and finish it now.
 - A progress, recap, audit, or "what is done or not done" request does not suspend execution when fixable in-scope work remains; answer honestly, then continue the loop and finish the remaining work before the closing response.
 - Do not present unresolved work as complete, and do not rely on the user to discover missing pieces after the answer lands.
@@ -455,11 +458,14 @@ REPEAT UNTIL CLEAN:
 
 **Scope Discipline & Greenfield vs. Brownfield Rules:**
 - **Brownfield (Existing Code)**: Strict compliance. ONLY implement what was requested. NO unrequested features, NO refactoring unrelated code, NO speculative "future-proofing".
+- **Named Scope First**: If the user asks to change function A, start with function A and its direct dependencies or callers. Expand only when impact analysis proves a broader change is required.
 - **Greenfield (New Projects)**: Architectural Innovation is ALLOWED. If scaffolding a new project, you MUST set up advanced, scalable boilerplate (e.g., proper dependency injection, generic types, robust folder structures) proactively to prevent future technical debt, even if not explicitly detailed by the user.
 - **When updating a feature:**
   - ✅ Just update it - don't keep old code
   - ✅ Delete unused code completely
   - ❌ NO backward compatibility unless explicitly requested
+  - ✅ Prefer small, batch-sized patches that keep review, validation, and rollback simple
+  - ✅ Re-read the touched code and rerun the lightest proving validation after each batch before expanding scope
 
 **Structure & Modularity (User Preference):**
 - Prefer modular structure: keep entrypoints thin and move named logic into focused files or modules.
@@ -478,8 +484,13 @@ REPEAT UNTIL CLEAN:
 - Minimal solution that works
 - No over-engineering
 - No premature optimization
+- No fake completion or workaround-only delivery; find the verified root cause and implement the real fix
 - **Security**: Validate inputs, no injection risks
 - **Testing**: Specific requirements below
+
+**Professional Comments and Documentation:**
+- Keep committed comments and documentation professional, concise, and neutral.
+- Avoid first-person and second-person pronouns in committed comments or documentation unless quoting user-provided text or an external source.
 
 ### Testing Requirements
 
@@ -487,6 +498,7 @@ REPEAT UNTIL CLEAN:
 - Prefer test-first when practical: start with a failing test, regression test, or executable acceptance check before changing production code.
 - If a true test-first path is not practical, define the validation target first and keep it explicit during implementation.
 - Match coverage to the delivery layers involved: backend or business logic, API contracts, frontend behavior, background jobs, and one realistic higher-layer confirmation for critical flows.
+- After each meaningful patch batch, rerun the narrowest validation that proves the batch before stacking more changes on top.
 - Keep tests aligned to the module or layer they protect so failures are easy to trace during debugging.
 
 **New Features:**
@@ -689,7 +701,7 @@ Before the final answer, perform a completion reconciliation pass. Do not descri
 Use a split-lane model instead of forcing every agent to mirror the main lane:
 - **high**: Main-agent slow lane for cross-layer root-cause debugging, risky refactors, security-sensitive changes, architecture pivots, and final synthesis
 - **medium**: Repo-managed specialist baseline used across the synced skill pack to keep specialist sub-agents responsive while preserving solid planning quality
-- **optional fast lane**: Use an explicit local home-agent override only for bounded helper work such as workspace exploration, file inventories, symbol maps, memory writes, research-cache lookup or record, completion-gate maintenance, and status or diff summaries when the runtime exposes a faster model such as `gpt-5.3-codex-spark` with `reasoning_effort: "high"`
+- **optional fast lane**: Use an explicit local home-agent override only for bounded helper work such as workspace exploration, file inventories, symbol maps, memory writes, research-cache lookup or record, completion-gate maintenance, and status or diff summaries when a narrower helper lane should stay cheaper than the main specialist baseline, for example `gpt-5.4` with `reasoning_effort: "low"` for `memory-status-reporter`
 
 Codex CLI does not need to mirror the main agent's strongest lane across every specialist. Keep the slow lane for the main agent or final gate, keep repo-managed specialists at `medium`, and opt into a faster helper lane only with an explicit local override.
 
@@ -697,8 +709,8 @@ Codex CLI does not need to mirror the main agent's strongest lane across every s
 
 - Do not pin a specific model inside ordinary root Codex `agents/openai.yaml` files. Let the workspace default model handle that choice; this repo assumes the workspace default is `gpt-5.4`.
 - Keep root Codex skill `reasoning_effort` at the repo-managed specialist baseline (`medium`) instead of mirroring the main-agent slow lane.
-- Home agent TOMLs should inherit model by default. Use explicit local overrides under `~/.codex/.codex-skill-manager/local-home-agent-overrides.json` only for bounded helper lanes that benefit from a faster or different model.
-- Sync the 12 skill-owned agent profiles into `~/.codex/agent-profiles/*.toml` so `reviewer`, `memory-status-reporter`, and the other specialist lanes are available as full profiles with their skill instructions attached, not just as raw skills. Keep those repo-managed skill agent profiles at `medium` reasoning by default, and let the local `memory-status-reporter` override promote only that lane to `gpt-5.3-codex-spark` plus `high`.
+- Home agent TOMLs and synced agent profiles should be written explicitly for the managed lanes: `gpt-5.4` with `medium` reasoning by default, plus a local `memory-status-reporter` override from `~/.codex/.codex-skill-manager/local-home-agent-overrides.json` to `gpt-5.4` with `low` when that helper lane should stay cheaper than the rest of the pack.
+- Sync the 12 skill-owned agent profiles into `~/.codex/agent-profiles/*.toml` so `reviewer`, `memory-status-reporter`, and the other specialist lanes are available as full profiles with their skill instructions attached, not just as raw skills. Keep those repo-managed skill agent profiles at `medium` reasoning by default, and let the local `memory-status-reporter` override narrow only that lane to `gpt-5.4` plus `low` when memory maintenance should stay cheaper than the rest of the pack.
 - Built-in spawned runtime roles such as `explorer`, `reviewer`, `worker`, and `architect` cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly.
 - When any Codex skill executes tools in this runtime, route the tool work through `js_repl` with `codex.tool(...)` rather than calling tools directly.
 

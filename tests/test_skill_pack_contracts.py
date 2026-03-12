@@ -8,7 +8,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
+
+from tests.parallel_contract_test_runner import (
+    discover_contract_test_targets,
+    resolve_parallel_worker_limit,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -287,6 +293,7 @@ class SkillPackContractTests(unittest.TestCase):
         missing_no_soft_stop_guidance: list[str] = []
         missing_honesty_guidance: list[str] = []
         missing_parallel_work_guidance: list[str] = []
+        missing_js_repl_only_guidance: list[str] = []
 
         for skill_directory in SKILL_DIRECTORIES:
             yaml_text = read_text(skill_directory / "agents" / "openai.yaml")
@@ -314,6 +321,8 @@ class SkillPackContractTests(unittest.TestCase):
                 missing_honesty_guidance.append(skill_directory.name)
             if "keep doing non-conflicting local work instead of idling" not in yaml_text:
                 missing_parallel_work_guidance.append(skill_directory.name)
+            if "Route tool work through js_repl with codex.tool(...)." not in yaml_text:
+                missing_js_repl_only_guidance.append(skill_directory.name)
 
         self.assertEqual([], missing_cache_guidance, f"missing cache guidance: {missing_cache_guidance}")
         self.assertEqual([], missing_autonomy_guidance, f"missing autonomy guidance: {missing_autonomy_guidance}")
@@ -327,6 +336,17 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertEqual([], missing_no_soft_stop_guidance, f"missing no-soft-stop guidance: {missing_no_soft_stop_guidance}")
         self.assertEqual([], missing_honesty_guidance, f"missing honesty guidance: {missing_honesty_guidance}")
         self.assertEqual([], missing_parallel_work_guidance, f"missing parallel work guidance: {missing_parallel_work_guidance}")
+        self.assertEqual([], missing_js_repl_only_guidance, f"missing js_repl guidance: {missing_js_repl_only_guidance}")
+
+        reviewer_agent_text = read_text(REPOSITORY_ROOT / "reviewer" / "agents" / "openai.yaml")
+        software_agent_text = read_text(
+            REPOSITORY_ROOT / "software-development-life-cycle" / "agents" / "openai.yaml"
+        )
+        self.assertIn("named surface", reviewer_agent_text)
+        self.assertIn("validated patch batches", reviewer_agent_text)
+        self.assertIn("workaround-only", reviewer_agent_text)
+        self.assertIn("named scope", software_agent_text)
+        self.assertIn("patch batch", software_agent_text)
 
     def test_core_guidance_requires_completion_reconciliation_and_agent_lanes(self) -> None:
         root_guidance_text = read_text(REPOSITORY_ROOT / "AGENTS.md")
@@ -354,18 +374,36 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("Cross-Platform Script Portability", root_guidance_text)
         self.assertIn("what is verified, what is inferred, and what remains blocked", root_guidance_text)
         self.assertIn("local-home-agent-overrides.json", root_guidance_text)
-        self.assertIn("gpt-5.3-codex-spark", root_guidance_text)
-        self.assertIn('reasoning_effort: "high"', root_guidance_text)
+        self.assertIn("gpt-5.4", root_guidance_text)
+        self.assertIn('reasoning_effort: "low"', root_guidance_text)
+        self.assertIn("written explicitly for the managed lanes", root_guidance_text)
         self.assertIn("~/.codex/agent-profiles/*.toml", root_guidance_text)
         self.assertIn("12 skill-owned agent profiles", root_guidance_text)
         self.assertIn("delegate the durable write to the `memory-status-reporter` lane", root_guidance_text)
+        self.assertIn("Named Scope First", root_guidance_text)
+        self.assertIn("small, batch-sized patches", root_guidance_text)
+        self.assertIn("fake completion or workaround-only delivery", root_guidance_text)
+        self.assertIn("Avoid first-person and second-person pronouns", root_guidance_text)
+        self.assertIn("Never hardcode runtime values", root_guidance_text)
+        self.assertIn("Hold the final output until the closing check is explicit", root_guidance_text)
+        self.assertIn("staged rollout doctrine", root_guidance_text)
+        self.assertIn("generic-looking UI repair", root_guidance_text)
+        self.assertIn("journey friction", root_guidance_text)
         self.assertNotIn("responsible for writing the durable memory update", root_guidance_text)
         self.assertIn("Requirement Reconciliation Before Close", routing_text)
         self.assertIn("Use A Completion Ledger For Real Closure", routing_text)
         self.assertIn("completion_gate.py check", routing_text)
         self.assertIn("Status Requests Do Not End The Job", routing_text)
+        self.assertIn("Honor The Named Scope First", routing_text)
+        self.assertIn("Small Validated Batches Beat Huge Rewrites", routing_text)
+        self.assertIn("Real Solutions Over Plausible Workarounds", routing_text)
+        self.assertIn("Anchor handoffs to the user story and named scope", routing_text)
         self.assertIn("Use Solo Mode Deliberately", routing_text)
         self.assertIn("Planning Defaults", routing_text)
+        self.assertIn("Do Not Ship Hardcoded Runtime Decisions", routing_text)
+        self.assertIn("Hold Final Synthesis Until Closure Checks Pass", routing_text)
+        self.assertIn("issue-driven Git delivery", routing_text)
+        self.assertIn("traffic-shift method", routing_text)
         self.assertIn("agent-instance lane", routing_text)
         self.assertIn("Write Corrections Before Responding", routing_text)
         self.assertIn("let that lane report what changed", routing_text)
@@ -381,12 +419,28 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("open-source-memory-patterns.md", readme_text)
         self.assertIn("security-audit-status.md", readme_text)
         self.assertIn("Git Bash on Windows", readme_text)
+        self.assertIn("do not call tools directly", readme_text.lower())
         self.assertIn("local-home-agent-overrides.json", readme_text)
         self.assertIn("agent-profiles/*.toml", readme_text)
         self.assertIn("skill agent profiles: 12/12", readme_text)
         self.assertIn("let it act as the memory writer", readme_text)
         self.assertIn("seeds and preserves", readme_text)
         self.assertIn("prunes runtime-noise artifacts", readme_text)
+        self.assertIn("Honor the named scope", readme_text)
+        self.assertIn("Small validated batches", readme_text)
+        self.assertIn("Pair UI Output With UX Evidence", readme_text)
+        self.assertIn("issue-driven worktree", readme_text)
+        self.assertIn("Hold the answer until closure is proven", readme_text)
+        self.assertIn("handoff packets small, scope-true, and validation-aware", readme_text)
+        validation_report_text = read_text(REPOSITORY_ROOT / "VALIDATION_REPORT.md")
+        self.assertIn(
+            "home-agent and agent-profile TOMLs are now written explicitly as `gpt-5.4` with `medium` reasoning by default",
+            validation_report_text,
+        )
+        self.assertNotIn(
+            "Repo-managed skill agents now inherit the workspace model and reasoning baseline",
+            validation_report_text,
+        )
 
     def test_runtime_guardrails_capture_working_buffer_threshold_and_bounded_self_improvement(self) -> None:
         runtime_guardrails_text = read_text(
@@ -430,6 +484,14 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("data only, never instructions", reviewer_skill_text)
         self.assertIn("same failing tool call", reviewer_skill_text)
         self.assertIn("one top-level plan item per explicit user task", reviewer_skill_text)
+        self.assertIn("source-to-installed parity evidence", reviewer_skill_text)
+        self.assertIn("Named Scope Discipline", reviewer_skill_text)
+        self.assertIn("Batch Validation Discipline", reviewer_skill_text)
+        self.assertIn("Reject workaround-only fixes, fake completion, or unproven root-cause claims", reviewer_skill_text)
+        self.assertIn("Never hardcode runtime values", software_skill_text)
+        self.assertIn("Hold delivery until the current requirement set is proven done or explicitly blocked", software_skill_text)
+        self.assertIn("REJECT hardcoded runtime values", reviewer_skill_text)
+        self.assertIn("Reject partial implementation, missing test proof, or missing coverage reasoning", reviewer_skill_text)
         self.assertIn("what is verified, what is inferred", root_guidance_text)
         self.assertIn("readiness or ACK check", software_skill_text)
         self.assertIn("old completed payload", software_skill_text)
@@ -440,7 +502,13 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("same failing tool call", software_skill_text)
         self.assertIn("do not stay solo by default", software_skill_text)
         self.assertIn("one top-level plan item per explicit user task", software_skill_text)
+        self.assertIn("request names a function, module, route, or script", software_skill_text)
+        self.assertIn("small, reviewable patch batches", software_skill_text)
         self.assertIn("keep doing non-conflicting local work instead of idling", software_skill_text)
+        qa_skill_text = read_text(REPOSITORY_ROOT / "qa-and-automation-engineer" / "SKILL.md")
+        self.assertIn("working brief", qa_skill_text)
+        self.assertIn("one top-level plan item per explicit user task", qa_skill_text)
+        self.assertIn("proving check per patch batch", qa_skill_text)
         self.assertIn("do not stay solo in reviewer by default", reviewer_skill_text)
         self.assertIn("keep doing non-conflicting local work instead of idling", reviewer_skill_text)
         self.assertIn("continuity-heavy flows", ui_skill_text)
@@ -577,9 +645,72 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("configured Git author identity", git_agent_text)
         self.assertIn("git config user.name", git_agent_text)
         self.assertIn("git config user.email", git_agent_text)
+        self.assertIn("Issue-Driven Worktree Flow", git_text)
+        self.assertIn("git worktree add", git_text)
+        self.assertIn("feature-by-feature", git_text)
+        self.assertIn("clean", git_text)
+        self.assertIn("CI and CD", git_text)
+        self.assertIn("issue-driven worktree", git_agent_text)
+        self.assertIn("CI/CD-gated PRs", git_agent_text)
+        self.assertIn("sensitive data leakage", git_agent_text)
         self.assertIn("explicit user approval", high_risk_section)
         self.assertIn("git reset --hard", high_risk_section)
         self.assertIn("git rebase -i", high_risk_section)
+
+    def test_cloud_ui_and_ux_quality_doctrine_is_enforced(self) -> None:
+        cloud_text = read_text(REPOSITORY_ROOT / "cloud-and-devops-expert" / "SKILL.md")
+        cloud_agent_text = read_text(
+            REPOSITORY_ROOT / "cloud-and-devops-expert" / "agents" / "openai.yaml"
+        )
+        ui_text = read_text(
+            REPOSITORY_ROOT / "ui-design-systems-and-responsive-interfaces" / "SKILL.md"
+        )
+        ui_agent_text = read_text(
+            REPOSITORY_ROOT
+            / "ui-design-systems-and-responsive-interfaces"
+            / "agents"
+            / "openai.yaml"
+        )
+        ux_text = read_text(REPOSITORY_ROOT / "ux-research-and-experience-strategy" / "SKILL.md")
+        ux_agent_text = read_text(
+            REPOSITORY_ROOT / "ux-research-and-experience-strategy" / "agents" / "openai.yaml"
+        )
+
+        self.assertIn("Deployment Stage and Adversarial Readiness", cloud_text)
+        for required_phrase in [
+            "alpha",
+            "beta",
+            "canary",
+            "release",
+            "blue-green",
+            "load-balancer traffic shifting",
+            "red-team",
+            "blue-team",
+            "Evidence Gate",
+        ]:
+            self.assertIn(required_phrase, cloud_text)
+        self.assertIn("red-team versus blue-team", cloud_agent_text)
+        self.assertIn("load-balancer behavior", cloud_agent_text)
+        self.assertIn("rollback owner", cloud_agent_text)
+        self.assertIn("abort signal", cloud_agent_text)
+
+        self.assertIn("Flow Proof and Quality Checks", ui_text)
+        self.assertIn("brownfield work stays targeted", ui_text)
+        self.assertIn("implementation-ready summary", ui_text)
+        self.assertIn("Benchmark 2-3 mature product-family surfaces", ui_agent_text)
+        self.assertIn("brownfield changes targeted", ui_agent_text)
+        self.assertIn("hardcoded design values", ui_agent_text)
+        self.assertIn("implementation-ready", ui_agent_text)
+
+        self.assertIn("Experience Quality Proof", ux_text)
+        self.assertIn("benchmark 2-3 mature flows", ux_text)
+        self.assertIn("targeted to the named journey step", ux_text)
+        self.assertIn("completion note", ux_text)
+        self.assertIn("Benchmark 2-3 mature flows", ux_agent_text)
+        self.assertIn("brownfield changes targeted", ux_agent_text)
+        self.assertIn("hardcoded assumptions", ux_agent_text)
+        self.assertIn("completion note", ux_agent_text)
+        self.assertIn("live testing", ux_agent_text)
 
     def test_sync_heading_helper_detects_real_world_review_section(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1505,6 +1636,96 @@ Notes:
             self.assertEqual("stale", stale_payload["status"])
             self.assertEqual("penalty", stale_payload["reinforcement"])
 
+    def test_research_cache_lookup_skips_entries_past_inferred_freshness_window(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "research_cache.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            workspace_path = temporary_path / "workspace"
+            workspace_path.mkdir()
+            memory_base = temporary_path / "memories"
+
+            record_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "record",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--question",
+                    "When should cache findings expire?",
+                    "--answer",
+                    "Monthly guidance should stop reusing findings once the month-sized window has passed.",
+                    "--source",
+                    "https://example.com/freshness",
+                    "--freshness",
+                    "Refresh monthly or after a tool/runtime change.",
+                    "--entry-key",
+                    "monthly-expiry",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, record_process.returncode, record_process.stdout + record_process.stderr)
+
+            cache_file = next(memory_base.rglob("cache.jsonl"))
+            existing_entry = json.loads(cache_file.read_text(encoding="utf-8").strip())
+            existing_entry["updated_at"] = "2025-01-01T00:00:00Z"
+            cache_file.write_text(json.dumps(existing_entry) + "\n", encoding="utf-8")
+
+            lookup_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "lookup",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--query",
+                    "cache findings expire",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, lookup_process.returncode, lookup_process.stdout + lookup_process.stderr)
+            self.assertEqual([], json.loads(lookup_process.stdout))
+
+            include_stale_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "lookup",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-review",
+                    "--query",
+                    "cache findings expire",
+                    "--include-stale",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                include_stale_process.returncode,
+                include_stale_process.stdout + include_stale_process.stderr,
+            )
+            include_stale_payload = json.loads(include_stale_process.stdout)
+            self.assertEqual(1, len(include_stale_payload))
+            self.assertEqual("monthly-expiry", include_stale_payload[0]["entry_key"])
+
     def test_agent_registry_tracks_same_role_reuse_and_unhealthy_recovery(self) -> None:
         script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "agent_registry.py"
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -2187,13 +2408,83 @@ Notes:
 
         completed_process = run_bash(
             "bash ./sync-skills.sh validate",
-            environment={"CODEX_SKIP_VALIDATE_SMOKE": "1"},
+            environment={
+                "CODEX_SKIP_VALIDATE_SMOKE": "1",
+                "CODEX_SKIP_VALIDATE_CONTRACT_TESTS": "1",
+            },
         )
         self.assertEqual(
             completed_process.returncode,
             0,
             completed_process.stdout + completed_process.stderr,
         )
+        self.assertNotIn("[run] contract tests", strip_ansi(completed_process.stdout + completed_process.stderr))
+
+    def test_validate_all_runs_contract_tests_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                'validate_codex_repo_docs() { return 0; }; '
+                'collect_failed_skill_names_parallel() { return 0; }; '
+                'run_repo_contract_tests() { printf "contract-tests-ran\\n" >&2; return 1; }; '
+                'validate_all'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(1, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("[run] contract tests", normalized_output)
+            self.assertIn("[FAIL] contract tests", normalized_output)
+            self.assertIn("contract-tests-ran", normalized_output)
+
+    def test_parallel_contract_test_runner_discovers_core_targets(self) -> None:
+        discovered_targets = discover_contract_test_targets()
+        self.assertIn(
+            "tests.test_skill_pack_contracts.SkillPackContractTests.test_sync_validate_smoke_passes",
+            discovered_targets,
+        )
+        self.assertIn(
+            "ui-design-systems-and-responsive-interfaces/tests/test_design_intelligence.py",
+            discovered_targets,
+        )
+
+    def test_parallel_contract_test_runner_uses_all_detected_processes_without_workload_estimate(self) -> None:
+        self.assertEqual(1, resolve_parallel_worker_limit(target_count=1, detected_process_count=32))
+        self.assertEqual(4, resolve_parallel_worker_limit(target_count=4, detected_process_count=32))
+        self.assertEqual(
+            3,
+            resolve_parallel_worker_limit(
+                target_count=3,
+                requested_worker_count=99,
+                detected_process_count=32,
+            ),
+        )
+
+    def test_parallel_contract_test_runner_uses_all_detected_processes_when_estimated_workload_supports_it(self) -> None:
+        self.assertEqual(
+            32,
+            resolve_parallel_worker_limit(
+                target_count=99,
+                detected_process_count=32,
+                estimated_total_seconds=200.0,
+            ),
+        )
+
+    def test_parallel_contract_test_runner_limits_default_workers_by_estimated_workload(self) -> None:
+        self.assertEqual(
+            9,
+            resolve_parallel_worker_limit(
+                target_count=57,
+                detected_process_count=32,
+                estimated_total_seconds=43.551,
+            ),
+        )
+
+    def test_parallel_contract_test_runner_falls_back_to_cpu_count_when_process_count_api_is_missing(self) -> None:
+        with mock.patch("tests.parallel_contract_test_runner.os.process_cpu_count", new=None, create=True):
+            with mock.patch("tests.parallel_contract_test_runner.os.cpu_count", return_value=5):
+                self.assertEqual(5, resolve_parallel_worker_limit(target_count=99))
 
     def test_repo_validation_ignores_live_reasoning_override_for_root_skill_configs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -2226,8 +2517,8 @@ Notes:
                 'cat > "$(skill_manager_local_home_agent_override_file)" <<\'JSON\'\n'
                 '{\n'
                 '  "memory-status-reporter": {\n'
-                '    "model": "gpt-5.3-codex-spark",\n'
-                '    "reasoning_effort": "high"\n'
+                '    "model": "gpt-5.4",\n'
+                '    "reasoning_effort": "low"\n'
                 '  }\n'
                 '}\n'
                 'JSON\n'
@@ -2240,8 +2531,8 @@ Notes:
                 completed_process.returncode,
                 completed_process.stdout + completed_process.stderr,
             )
-            self.assertIn('model = "gpt-5.3-codex-spark"', completed_process.stdout)
-            self.assertIn('model_reasoning_effort = "high"', completed_process.stdout)
+            self.assertIn('model = "gpt-5.4"', completed_process.stdout)
+            self.assertIn('model_reasoning_effort = "low"', completed_process.stdout)
 
     def test_skill_agent_profiles_sync_to_codex_home_with_skill_prompts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -2255,12 +2546,54 @@ Notes:
                 'seed_default_local_home_agent_overrides; '
                 'while IFS= read -r skill_name; do sync_codex_home_agents_for_skill "$skill_name"; done < <(list_repo_skill_names); '
                 'sync_skill_agent_profiles_to_codex; '
+                'python3 - "$CODEX_TARGET" <<\'PY\'\n'
+                'from pathlib import Path\n'
+                'import sys\n'
+                'target = Path(sys.argv[1])\n'
+                'managed_agent_names = sorted(path.stem for path in (target / "agents").glob("*.toml"))\n'
+                'assert len(managed_agent_names) == 12, managed_agent_names\n'
+                'for agent_name in managed_agent_names:\n'
+                '    for surface_name in ("agents", "agent-profiles"):\n'
+                '        toml_text = (target / surface_name / f"{agent_name}.toml").read_text(encoding="utf-8")\n'
+                '        assert \"model = \\\"gpt-5.4\\\"\" in toml_text\n'
+                '        expected_reasoning = \"low\" if agent_name == \"memory-status-reporter\" else \"medium\"\n'
+                '        assert f\"model_reasoning_effort = \\\"{expected_reasoning}\\\"\" in toml_text\n'
+                'PY\n'
                 "find \"$CODEX_TARGET/agent-profiles\" -maxdepth 1 -type f -name '*.toml' | wc -l; "
+               "grep -q '^model = \"gpt-5.4\"$' \"$CODEX_TARGET/agents/reviewer.toml\"; "
+               "grep -q '^model_reasoning_effort = \"medium\"$' \"$CODEX_TARGET/agents/reviewer.toml\"; "
+               "grep -q 'Do not call tools directly in this runtime; route all tool work through js_repl with codex.tool(...)' \"$CODEX_TARGET/agents/reviewer.toml\"; "
+               "grep -q 'research_cache.py lookup' \"$CODEX_TARGET/agents/reviewer.toml\"; "
+               "grep -q 'completion_gate.py check' \"$CODEX_TARGET/agents/reviewer.toml\"; "
+               "grep -q 'keep the first implementation pass anchored to that named scope' \"$CODEX_TARGET/agents/reviewer.toml\"; "
+               "grep -q 'Prefer small, reviewable patch batches' \"$CODEX_TARGET/agents/reviewer.toml\"; "
+               "grep -q 'Do not stop at a workaround that merely appears to pass' \"$CODEX_TARGET/agents/reviewer.toml\"; "
+               "grep -q 'wait times out' \"$CODEX_TARGET/agents/reviewer.toml\"; "
+               "grep -q 'Validate each patch batch before widening scope' \"$CODEX_TARGET/agents/software-development-life-cycle.toml\"; "
+               "grep -q 'rollback owner' \"$CODEX_TARGET/agents/cloud-and-devops-expert.toml\"; "
+               "grep -q 'abort signal' \"$CODEX_TARGET/agents/cloud-and-devops-expert.toml\"; "
+               "grep -q 'hardcoded design values' \"$CODEX_TARGET/agents/ui-design-systems-and-responsive-interfaces.toml\"; "
+               "grep -q 'implementation-ready' \"$CODEX_TARGET/agents/ui-design-systems-and-responsive-interfaces.toml\"; "
+               "grep -q 'completion note' \"$CODEX_TARGET/agents/ux-research-and-experience-strategy.toml\"; "
+               "grep -q 'live testing' \"$CODEX_TARGET/agents/ux-research-and-experience-strategy.toml\"; "
+               "grep -q '^model = \"gpt-5.4\"$' \"$CODEX_TARGET/agents/memory-status-reporter.toml\"; "
+               "grep -q '^model_reasoning_effort = \"low\"$' \"$CODEX_TARGET/agents/memory-status-reporter.toml\"; "
                'test -f "$CODEX_TARGET/agent-profiles/reviewer.toml"; '
                'test -f "$CODEX_TARGET/agent-profiles/memory-status-reporter.toml"; '
+               "grep -q '^model = \"gpt-5.4\"$' \"$CODEX_TARGET/agent-profiles/reviewer.toml\"; "
                "grep -q '^model_reasoning_effort = \"medium\"$' \"$CODEX_TARGET/agent-profiles/reviewer.toml\"; "
-               "grep -q '^model = \"gpt-5.3-codex-spark\"$' \"$CODEX_TARGET/agent-profiles/memory-status-reporter.toml\"; "
-               "grep -q '^model_reasoning_effort = \"high\"$' \"$CODEX_TARGET/agent-profiles/memory-status-reporter.toml\"; "
+               "grep -q 'Do not call tools directly in this runtime; route all tool work through js_repl with codex.tool(...)' \"$CODEX_TARGET/agent-profiles/reviewer.toml\"; "
+               "grep -q 'keep the first implementation pass anchored to that named scope' \"$CODEX_TARGET/agent-profiles/reviewer.toml\"; "
+               "grep -q 'Prefer small, reviewable patch batches' \"$CODEX_TARGET/agent-profiles/reviewer.toml\"; "
+               "grep -q 'Validate each patch batch before widening scope' \"$CODEX_TARGET/agent-profiles/software-development-life-cycle.toml\"; "
+               "grep -q 'rollback owner' \"$CODEX_TARGET/agent-profiles/cloud-and-devops-expert.toml\"; "
+               "grep -q 'abort signal' \"$CODEX_TARGET/agent-profiles/cloud-and-devops-expert.toml\"; "
+               "grep -q 'hardcoded design values' \"$CODEX_TARGET/agent-profiles/ui-design-systems-and-responsive-interfaces.toml\"; "
+               "grep -q 'implementation-ready' \"$CODEX_TARGET/agent-profiles/ui-design-systems-and-responsive-interfaces.toml\"; "
+               "grep -q 'completion note' \"$CODEX_TARGET/agent-profiles/ux-research-and-experience-strategy.toml\"; "
+               "grep -q 'live testing' \"$CODEX_TARGET/agent-profiles/ux-research-and-experience-strategy.toml\"; "
+               "grep -q '^model = \"gpt-5.4\"$' \"$CODEX_TARGET/agent-profiles/memory-status-reporter.toml\"; "
+               "grep -q '^model_reasoning_effort = \"low\"$' \"$CODEX_TARGET/agent-profiles/memory-status-reporter.toml\"; "
                 'test ! -f "$CODEX_TARGET/agent-profiles/default.toml"; '
                 'test ! -f "$CODEX_TARGET/agent-profiles/explorer.toml"; '
                 'test ! -f "$CODEX_TARGET/agent-profiles/worker.toml"; '
@@ -2287,6 +2620,7 @@ Notes:
                 'seed_default_local_home_agent_overrides >/dev/null; '
                 'while IFS= read -r skill_name; do sync_codex_home_agents_for_skill "$skill_name"; done < <(list_repo_skill_names); '
                 'sync_skill_agent_profiles_to_codex >/dev/null; '
+                'printf "model = \\\"gpt-5.4\\\"\\nmodel_reasoning_effort = \\\"medium\\\"\\n" > "$CODEX_TARGET/agents/memory-status-reporter.toml"; '
                 'write_managed_skill_inventory_from_repo; '
                 'write_managed_home_agent_inventory_from_repo; '
                 'write_managed_agent_profile_inventory_from_repo; '
@@ -2297,6 +2631,8 @@ Notes:
                 'root_guidance_files_need_update() { return 1; }; '
                 'verify_pack_checksums() { return 0; }; '
                'apply_repo_managed_changes; '
+               'grep -q "^model = \\\"gpt-5.4\\\"$" "$CODEX_TARGET/agents/memory-status-reporter.toml"; '
+               'grep -q "^model_reasoning_effort = \\\"low\\\"$" "$CODEX_TARGET/agents/memory-status-reporter.toml"; '
                'test -f "$CODEX_TARGET/agent-profiles/reviewer.toml"; '
                'test -f "$(skill_manager_local_home_agent_override_file)"'
             )
@@ -2404,8 +2740,110 @@ Notes:
             )
             payload = json.loads(completed_process.stdout[completed_process.stdout.index("{"):])
             self.assertEqual({"model": "gpt-5.4"}, payload["custom-helper"])
-            self.assertEqual("gpt-5.3-codex-spark", payload["memory-status-reporter"]["model"])
-            self.assertEqual("high", payload["memory-status-reporter"]["reasoning_effort"])
+            self.assertEqual("gpt-5.4", payload["memory-status-reporter"]["model"])
+            self.assertEqual("low", payload["memory-status-reporter"]["reasoning_effort"])
+
+    def test_non_memory_managed_agent_overrides_are_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agents" "$(skill_manager_state_directory)"; '
+                'cat > "$(skill_manager_local_home_agent_override_file)" <<\'JSON\'\n'
+                '{\n'
+                '  "reviewer": {\n'
+                '    "model": "gpt-5.4",\n'
+                '    "reasoning_effort": "low"\n'
+                '  },\n'
+                '  "custom-helper": {\n'
+                '    "model": "gpt-5.4"\n'
+                '  }\n'
+                '}\n'
+                'JSON\n'
+                'sync_codex_home_agent_from_yaml "reviewer" "$CODEX_SOURCE/reviewer/agents/openai.yaml" "reviewer"; '
+                'cat "$CODEX_TARGET/agents/reviewer.toml"; '
+                'printf "\n===OVERRIDE===\n"; '
+                'cat "$(skill_manager_local_home_agent_override_file)"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            reviewer_toml_text, override_text = completed_process.stdout.split("===OVERRIDE===", maxsplit=1)
+            self.assertIn('model = "gpt-5.4"', reviewer_toml_text)
+            self.assertIn('model_reasoning_effort = "medium"', reviewer_toml_text)
+            override_payload = json.loads(override_text)
+            self.assertEqual("low", override_payload["reviewer"]["reasoning_effort"])
+            self.assertEqual({"model": "gpt-5.4"}, override_payload["custom-helper"])
+
+    def test_sync_root_guidance_files_copies_runtime_reference_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'sync_root_guidance_files >/dev/null; '
+                'test -f "$CODEX_TARGET/docs/runtime-guardrails-and-memory-protocols.md"; '
+                'test -f "$CODEX_TARGET/docs/open-source-memory-patterns.md"; '
+                'test -f "$CODEX_TARGET/docs/security-audit-status.md"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+
+    def test_sync_memory_status_home_wiring_preserves_top_level_user_model_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET"; '
+                'cat > "$CODEX_TARGET/config.toml" <<\'EOF\'\n'
+                'model = "gpt-5.4"\n'
+                'model_reasoning_effort = "high"\n'
+                'approval_policy = "untrusted"\n'
+                '[profiles.default]\n'
+                'sandbox_mode = "workspace-write"\n'
+                'developer_instructions = \'\'\'\n'
+                'User-owned top-level instructions stay here.\n'
+                '\'\'\'\n'
+                '[agents.custom-helper]\n'
+                'description = "User-owned custom helper"\n'
+                'config_file = "agents/custom-helper.toml"\n'
+                'EOF\n'
+                'sync_memory_status_reporter_home_wiring >/dev/null; '
+                'python3 - "$CODEX_TARGET/config.toml" <<\'PY\'\n'
+                'from pathlib import Path\n'
+                'import sys\n'
+                'config_text = Path(sys.argv[1]).read_text(encoding="utf-8")\n'
+                'assert \"model = \\\"gpt-5.4\\\"\" in config_text\n'
+                'assert \"model_reasoning_effort = \\\"high\\\"\" in config_text\n'
+                'assert \"approval_policy = \\\"untrusted\\\"\" in config_text\n'
+                'assert \"[profiles.default]\\n\" in config_text\n'
+                'assert \"sandbox_mode = \\\"workspace-write\\\"\" in config_text\n'
+                'assert \"[agents.custom-helper]\\n\" in config_text\n'
+                'assert \"description = \\\"User-owned custom helper\\\"\" in config_text\n'
+                'assert \"[agents.memory-status-reporter]\" in config_text\n'
+                'PY'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
 
     def test_prune_repo_managed_installation_noise_removes_tests_and_caches_from_codex_home(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -2444,7 +2882,10 @@ Notes:
         with tempfile.TemporaryDirectory() as temporary_directory:
             completed_process = run_bash(
                 f'bash "{SYNC_SCRIPT_PATH}" validate',
-                environment={"CODEX_SKIP_VALIDATE_SMOKE": "1"},
+                environment={
+                    "CODEX_SKIP_VALIDATE_SMOKE": "1",
+                    "CODEX_SKIP_VALIDATE_CONTRACT_TESTS": "1",
+                },
                 working_directory=Path(temporary_directory),
             )
             self.assertEqual(
@@ -2452,6 +2893,7 @@ Notes:
                 0,
                 completed_process.stdout + completed_process.stderr,
             )
+            self.assertNotIn("[run] contract tests", strip_ansi(completed_process.stdout + completed_process.stderr))
 
     def test_powershell_validate_smoke_passes_when_available(self) -> None:
         if os.environ.get("CODEX_SKIP_VALIDATE_SMOKE") == "1":
@@ -2475,12 +2917,20 @@ Notes:
             check=False,
             capture_output=True,
             text=True,
-            env={**os.environ, "CODEX_SKIP_VALIDATE_SMOKE": "1"},
+            env={
+                **os.environ,
+                "CODEX_SKIP_VALIDATE_SMOKE": "1",
+                "CODEX_SKIP_VALIDATE_CONTRACT_TESTS": "1",
+            },
         )
         self.assertEqual(
             completed_process.returncode,
             0,
             completed_process.stdout + completed_process.stderr,
+        )
+        self.assertNotIn(
+            "[run] contract tests",
+            strip_ansi(completed_process.stdout + completed_process.stderr),
         )
 
 
