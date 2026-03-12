@@ -248,10 +248,14 @@ Located in root directories (12 skill directories total).
 8. **ui-design-systems-and-responsive-interfaces** - Design systems, accessibility, visual execution
 9. **ux-research-and-experience-strategy** - UX framing, jobs-to-be-done, usability strategy
 10. **git-expert** - Repository-state safety, branching, recovery, review handoff
-11. **memory-status-reporter** - Daily learnings, mistake ledgers, tool-mistake tracking, and heuristic memory-health reporting
+11. **memory-status-reporter** - Daily learnings, mistake ledgers, tool-mistake tracking, heuristic memory-health reporting, and delegated durable memory writes
 12. **reviewer** - Production readiness, quality gates, DRY enforcement, and final validation
 
-When the task clearly belongs to one surface, route to that specialist first. `reviewer` is the quality gate, not the default implementation owner.
+When the task clearly belongs to one surface, route to that specialist first. `reviewer` is the quality gate, not the default implementation owner. On non-trivial work, do not stay solo by default when a matching specialist or bounded sub-agent lane can own part of the job.
+
+### Git Commit Identity
+
+When a task includes creating a Git commit, keep the commit author on the configured Git identity from `git config user.name` and `git config user.email`. Do not swap the author name to an assistant label just because the commit was prepared through Codex tooling.
 
 ### Use the UI Design-Intelligence Generator
 
@@ -286,8 +290,9 @@ The sync does all of the following:
 - copies root skills into `~/.codex/skills/`
 - copies `AGENTS.md` and `00-skill-routing-and-escalation.md` into `~/.codex/`
 - refreshes `~/.codex/agents/*.toml` from each root `agents/openai.yaml`
-- keeps repo-managed skill agents inheriting the workspace model and reasoning baseline instead of pinning per-skill model overrides
+- keeps repo-managed specialist skills on the repo baseline of `reasoning_effort: "medium"` instead of mirroring the main-agent slow lane in source
 - keeps `~/.codex/config.toml` wired for `memory-status-reporter`
+- allows explicit local home-agent overrides in `~/.codex/.codex-skill-manager/local-home-agent-overrides.json` for bounded fast helper lanes without changing repo policy
 - writes install metadata with the current repo version
 - tracks the repo-managed installed skill set for update and uninstall safety
 - compares source and installed files with MD5 checksums after sync
@@ -328,11 +333,12 @@ This repo now treats context efficiency like a product requirement.
 ### Default Retrieval Ladder
 
 1. **Working brief first** — restate the user story, outcome, constraints, acceptance criteria, and validation plan
-2. **Exact retrieval first** — use file, symbol, or keyword search before broad reads
-3. **Targeted reads second** — inspect only the relevant snippets, callers, callees, and direct dependencies
-4. **Full reads only for edit scope** — fully read only files you will edit or that directly drive the change
-5. **Surgical patching** — change only the impacted ranges instead of rewriting whole files
-6. **Final re-read** — re-read the working brief plus touched files before validating or answering
+2. **Mirror the task list** — preserve one top-level plan item per explicit user task and give each top-level item its own short breakdown before implementation
+3. **Exact retrieval first** — use file, symbol, or keyword search before broad reads
+4. **Targeted reads second** — inspect only the relevant snippets, callers, callees, and direct dependencies
+5. **Full reads only for edit scope** — fully read only files you will edit or that directly drive the change
+6. **Surgical patching** — change only the impacted ranges instead of rewriting whole files
+7. **Final re-read** — re-read the working brief plus touched files before validating or answering
 
 ### Token-Saving Techniques
 
@@ -524,7 +530,24 @@ Run:
 
 Then verify `~/.codex/config.toml` contains the `memory-status-reporter` route line, the `memory-status-reporter` agent block, and the injected execution-policy lines for working briefs, context retrieval, surgical patching, modular structure, and learning snapshots.
 
-Also verify `./sync-skills.sh status` reports full agent inheritance unless you intentionally added your own local overrides. In the current repo policy, repo-managed skill agents inherit the workspace model and reasoning baseline, while built-in runtime roles such as `explorer`, `reviewer`, `worker`, and `architect` still depend on runtime model-selection support.
+Also verify `./sync-skills.sh status` reports full agent inheritance unless you intentionally added your own local overrides. In the current repo policy, repo-managed specialist skills stay at the repo baseline of `reasoning_effort: "medium"` in source, optional fast helper lanes can be pinned only through `~/.codex/.codex-skill-manager/local-home-agent-overrides.json`, and built-in runtime roles such as `explorer`, `reviewer`, `worker`, and `architect` still depend on runtime model-selection support.
+
+### Optional fast-lane home-agent overrides
+
+Keep the repo policy simple by leaving root `agents/openai.yaml` files model-agnostic. If your local runtime actually exposes a faster bounded helper model, add a local override file instead:
+
+```json
+{
+  "memory-status-reporter": {
+    "model": "gpt-5.3-codex-spark",
+    "reasoning_effort": "high"
+  }
+}
+```
+
+Save that JSON to `~/.codex/.codex-skill-manager/local-home-agent-overrides.json`. Use it only for bounded helper lanes such as memory writes, research-cache maintenance, completion-gate updates, file inventories, diff summaries, or small doc-only audits. Do not use it to globally repin built-in runtime roles such as `explorer`, `reviewer`, `worker`, or `architect`.
+
+When durable memory needs to change, route that write through the `memory-status-reporter` lane, let it act as the memory writer, then verify the touched memory files are clean and in sync before closing the task.
 
 ### Windows install fails looking for `python3`
 

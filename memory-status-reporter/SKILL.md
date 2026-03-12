@@ -30,6 +30,12 @@ Turn Codex memory artifacts into a human-readable status report that feels like 
 - Treat corrections, decisions, proper nouns, preferences, and specific values as write-ahead material that must be persisted before you answer.
 - The default scoped files are `SESSION-STATE.md` for the readable state, `session-wal.jsonl` for the append-only recovery log, and `working-buffer.md` for high-context turn breadcrumbs.
 - If the user corrects a spelling, changes an option, supplies a durable preference, or narrows a value, write it to scoped session state first and only then compose the reply.
+- When another lane detects dirty durable memory, let this skill act as the memory writer: update only the needed scoped memory file, report what changed back to the caller, and let the caller verify the touched files are clean and in sync.
+- Use `SESSION-STATE.md` only for durable corrections, decisions, names, preferences, exact values, or confirmed constraints.
+- Use `working-buffer.md` only for long-running or high-context work, not for every turn.
+- Use `research_cache.py record` only after reusable external research with freshness guidance.
+- Use `completion_gate.py` only for non-trivial explicit asks that need tracked closure.
+- Use `agent_registry.py` only when same-role lanes are actually being spawned and reused.
 - When the runtime exposes context usage, start writing the working buffer at roughly 60 percent usage; otherwise switch on the buffer as soon as context pressure is high or a long task is still unfolding so the next turn can reconstruct the work after compaction.
 
 ## Security and Anti-Loop Guardrails
@@ -53,6 +59,7 @@ Turn Codex memory artifacts into a human-readable status report that feels like 
 - The user wants heuristic memory-health stats such as learning capture, resolution rate, or brain growth.
 - The user wants tool-use mistakes and tool failure patterns remembered as mistakes too when those corrections are reusable.
 - The user wants a report that reflects remembered user preferences and current needs.
+- Another lane needs a bounded memory writer to update scoped memory and return a clean change summary.
 
 ## Report Contract
 
@@ -104,21 +111,21 @@ Always produce these sections unless the user narrows the scope:
 9. If research produced a reusable finding, record or refresh it in the scoped cache with source, freshness, and reinforcement status before you finish, and archive stale or superseded entries instead of replaying them forever.
 10. If the user wants a saved artifact, rerun with `--output ~/.codex/memories/reports/<date>-memory-status.md`.
 11. If the user wants a broader window, use `--days 7` for a trailing seven-day view ending on the anchor date, or pair it with a specific `--date`.
-12. When the user supplies a durable correction or decision, write it first with the maintenance helper:
+12. When the user supplies a durable correction or decision, act as the memory writer and write it first with the maintenance helper:
    ```javascript
    const pythonLauncher = "python"; // Replace with python3 or py -3 when that is the working launcher in this runtime.
    await codex.tool("exec_command", {
      cmd: `${pythonLauncher} ~/.codex/skills/memory-status-reporter/scripts/memory_maintenance.py write-session-state --memory-base ~/.codex/memories --workspace-root "$PWD" --workstream-key active-workstream --agent-instance reviewer-main --category decision --detail "Option B is the confirmed direction."`
    })
    ```
-13. For high-context work, append the newest breadcrumb to the working buffer before the thread gets noisy:
+13. For high-context work only, append the newest breadcrumb to the working buffer before the thread gets noisy:
    ```javascript
    const pythonLauncher = "python"; // Replace with python3 or py -3 when that is the working launcher in this runtime.
    await codex.tool("exec_command", {
      cmd: `${pythonLauncher} ~/.codex/skills/memory-status-reporter/scripts/memory_maintenance.py append-working-buffer --memory-base ~/.codex/memories --workspace-root "$PWD" --workstream-key active-workstream --agent-instance reviewer-main --text "Validated the sync validator after the rollout-memory patch."`
    })
    ```
-14. For non-trivial tasks, record the scoped requirement ledger before the work gets noisy:
+14. For non-trivial tasks that truly need tracked closure, record the scoped requirement ledger before the work gets noisy:
    ```javascript
    const pythonLauncher = "python"; // Replace with python3 or py -3 when that is the working launcher in this runtime.
    await codex.tool("exec_command", {
@@ -128,18 +135,19 @@ Always produce these sections unless the user narrows the scope:
      cmd: `${pythonLauncher} ~/.codex/skills/memory-status-reporter/scripts/completion_gate.py check --memory-base ~/.codex/memories --workspace-root "$PWD" --workstream-key active-workstream --agent-instance reviewer-main`
    })
    ```
-15. Use `trim` to archive overflow from L1 memory files instead of letting always-read files grow without bound.
-16. Use `recalibrate` to re-read the scoped L1 files and compare observed behavior notes against the current canonical rules when long sessions or repeated mistakes suggest drift.
-17. Use the spawned-agent registry helper to persist same-role reuse decisions across turns instead of relying on recall alone. The helper lives at `~/.codex/skills/memory-status-reporter/scripts/agent_registry.py` and supports `register`, `lookup`, `list`, `set-status`, and `mark-unhealthy`.
-18. Use agent_packets.py when you need a reusable handoff, feedback, or readiness-check packet instead of rebuilding that structure from scratch. Save those packets under scoped L3 reference memory so resumed lanes can reuse them without replaying the whole transcript.
-19. Use loop_guard.py when the same tool shape or plan keeps failing. Record the failure signature, check whether the retry budget is exhausted, and change approach before you repeat the same failure a third time.
-20. Only use spawned sub-agents when the report itself requires independent verification or parallel evidence gathering. Follow OpenAI-aligned orchestration defaults: use **agents as tools** when a manager should retain control of the turn, use **handoffs** when routing should transfer ownership of the rest of the turn, and use code-orchestrated sequencing for deterministic reporting pipelines or bounded parallel branches.
-21. Keep local runtime state and memory storage separate from model-visible context unless they are intentionally exposed. Prefer filtered history or concise handoff packets over replaying the full transcript, choose one conversation continuation strategy per thread unless there is an explicit reconciliation plan, and preserve workflow names, trace metadata, plus validation evidence when a report spans multiple agents.
-22. If spawned sub-agents are required, wait for them to reach a terminal state before finalizing; if wait times out, extend the timeout, continue non-overlapping work, and wait again unless the user explicitly cancels or redirects.
-23. Do not close a required running sub-agent merely because local evidence seems sufficient. Within the same project or workstream, keep at most one live same-role agent, maintain a lightweight spawned-agent list keyed by role or workstream, and check that list before every `spawn_agent` call. Never spawn a second same-role sub-agent if one already exists; always reuse it with `send_input` or `resume_agent`, avoid `interrupt=true` unless the user explicitly cancels or redirects, and resume a closed same-role agent before considering any new spawn. Keep `fork_context` off unless the exact parent thread history is required.
-24. When the main agent has parallel sub-agents running, keep doing non-conflicting local work instead of idling. Separate write scopes before dispatch so parallel work stays efficient.
-25. When delegating, send a robust handoff covering the exact objective, constraints, relevant file paths, current findings, validation state, non-goals, and expected output.
-26. Before the final answer, reconcile every explicit user requirement against current evidence, rerun the scoped completion gate for non-trivial tasks, and do not present unresolved work as complete.
+15. When another lane asked for a memory write, report what changed and which scoped files were touched before handing control back.
+16. Use `trim` to archive overflow from L1 memory files instead of letting always-read files grow without bound.
+17. Use `recalibrate` to re-read the scoped L1 files and compare observed behavior notes against the current canonical rules when long sessions or repeated mistakes suggest drift.
+18. Use the spawned-agent registry helper to persist same-role reuse decisions across turns instead of relying on recall alone, but only when same-role lanes are actually being spawned and reused. The helper lives at `~/.codex/skills/memory-status-reporter/scripts/agent_registry.py` and supports `register`, `lookup`, `list`, `set-status`, and `mark-unhealthy`.
+19. Use agent_packets.py when you need a reusable handoff, feedback, or readiness-check packet instead of rebuilding that structure from scratch. Save those packets under scoped L3 reference memory so resumed lanes can reuse them without replaying the whole transcript.
+20. Use loop_guard.py when the same tool shape or plan keeps failing. Record the failure signature, check whether the retry budget is exhausted, and change approach before you repeat the same failure a third time.
+21. Only use spawned sub-agents when the report itself requires independent verification or parallel evidence gathering. Follow OpenAI-aligned orchestration defaults: use **agents as tools** when a manager should retain control of the turn, use **handoffs** when routing should transfer ownership of the rest of the turn, and use code-orchestrated sequencing for deterministic reporting pipelines or bounded parallel branches.
+22. Keep local runtime state and memory storage separate from model-visible context unless they are intentionally exposed. Prefer filtered history or concise handoff packets over replaying the full transcript, choose one conversation continuation strategy per thread unless there is an explicit reconciliation plan, and preserve workflow names, trace metadata, plus validation evidence when a report spans multiple agents.
+23. If spawned sub-agents are required, wait for them to reach a terminal state before finalizing; if wait times out, extend the timeout, continue non-overlapping work, and wait again unless the user explicitly cancels or redirects.
+24. Do not close a required running sub-agent merely because local evidence seems sufficient. Within the same project or workstream, keep at most one live same-role agent, maintain a lightweight spawned-agent list keyed by role or workstream, and check that list before every `spawn_agent` call. Never spawn a second same-role sub-agent if one already exists; always reuse it with `send_input` or `resume_agent`, avoid `interrupt=true` unless the user explicitly cancels or redirects, and resume a closed same-role agent before considering any new spawn. Keep `fork_context` off unless the exact parent thread history is required.
+25. When the main agent has parallel sub-agents running, keep doing non-conflicting local work instead of idling. Separate write scopes before dispatch so parallel work stays efficient.
+26. When delegating, send a robust handoff covering the exact objective, constraints, relevant file paths, current findings, validation state, non-goals, and expected output.
+27. Before the final answer, reconcile every explicit user requirement against current evidence, rerun the scoped completion gate for non-trivial tasks, and do not present unresolved work as complete.
 
 ## Source Priority
 

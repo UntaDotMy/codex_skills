@@ -332,7 +332,11 @@ CODEX_TARGET="$(resolve_codex_target_directory)"
 
 MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- Route to memory-status-reporter for memory status, daily learning recaps, mistake ledgers, user-needs summaries, and heuristic growth reporting."
+    "- When durable memory must change, delegate the write to memory-status-reporter when that lane is available, let it report what changed, and validate the touched memory files before finalizing."
+    "- Use SESSION-STATE.md only for durable corrections, decisions, names, preferences, exact values, or confirmed constraints; use working-buffer.md only for long-running or high-context work; use research_cache.py, completion_gate.py, and agent_registry.py only when their specific trigger conditions apply."
     "- Start every non-trivial task by translating the raw request into a working brief: user story, desired outcome, constraints, assumptions, acceptance criteria, edge cases, and validation plan."
+    "- If a non-trivial task clearly belongs to one specialist surface, do not stay solo by default; route to that owning skill or staff a bounded specialist lane instead of keeping all work in the main lane."
+    "- For multi-part requests, preserve one top-level plan item per explicit user task and give each top-level item its own breakdown, validation target, and completion check before implementation."
     "- Strengthen vague prompts from repository, runtime, and memory evidence before acting; if business logic remains ambiguous, clarify instead of drifting."
     "- When business intent remains ambiguous after repository and runtime inspection, use request_user_input to confirm direction instead of guessing."
     "- For code work, prefer test-first when practical by starting with a failing test or executable acceptance check before implementation."
@@ -350,6 +354,7 @@ MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- If a tool call fails or is misused and the fix teaches a reusable lesson, record it as a mistake with tool name, symptom, cause, fix, and prevention note in rollout summaries and durable memory."
     "- Promote validated wins into rewarded patterns, repeated mistakes into penalty patterns, and reusable research into a freshness-aware cache so future tasks research only what is new."
     "- If a required sub-agent is still needed, do not use send_input(..., interrupt=true) or close it to rush synthesis; reuse the same live agent, keep the handoff bounded, and wait for terminal state unless the user explicitly cancels or redirects."
+    "- When sub-agents are running, keep doing non-conflicting local work instead of idling, and wait only when the next step truly depends on their result."
 )
 
 config_has_required_memory_status_lines() {
@@ -772,6 +777,57 @@ skill_manager_metadata_file() {
     printf '%s/install-metadata.txt\n' "$(skill_manager_state_directory)"
 }
 
+skill_manager_local_home_agent_override_file() {
+    printf '%s/local-home-agent-overrides.json\n' "$(skill_manager_state_directory)"
+}
+
+read_local_home_agent_override_value() {
+    local home_agent_name=$1
+    local field_name=$2
+    local override_file
+
+    override_file="$(skill_manager_local_home_agent_override_file)"
+    [[ -f "$override_file" ]] || return 0
+
+    run_python - "$override_file" "$home_agent_name" "$field_name" <<'PY'
+from pathlib import Path
+import json
+import sys
+
+override_file = Path(sys.argv[1])
+home_agent_name = sys.argv[2]
+field_name = sys.argv[3]
+
+try:
+    payload = json.loads(override_file.read_text(encoding="utf-8"))
+except json.JSONDecodeError as exc:
+    raise SystemExit(f"Invalid local home-agent override file {override_file}: {exc}")
+
+if not isinstance(payload, dict):
+    raise SystemExit(f"Local home-agent override file must contain a JSON object: {override_file}")
+
+agent_payload = payload.get(home_agent_name, {})
+if agent_payload is None:
+    agent_payload = {}
+
+if not isinstance(agent_payload, dict):
+    raise SystemExit(
+        f"Local home-agent override entry for {home_agent_name} must be a JSON object: {override_file}"
+    )
+
+value = agent_payload.get(field_name, "")
+if value is None:
+    value = ""
+
+if value != "" and not isinstance(value, str):
+    raise SystemExit(
+        f"Local home-agent override field {field_name!r} for {home_agent_name} must be a string"
+    )
+
+print(value)
+PY
+}
+
 pack_has_repo_managed_files() {
     local installed_skill_name
 
@@ -1087,10 +1143,6 @@ list_tracked_home_agent_names_for_skill() {
     fi
 
     printf '%s\n' "$skill_name"
-}
-
-spark_override_model_for_home_agent() {
-    return 1
 }
 
 expected_reasoning_for_home_agent() {
@@ -1557,6 +1609,8 @@ agent_config_has_required_runtime_guidance() {
         'Research current external information before trusting internal knowledge' \
         'request_user_input' \
         'keep iterating in the same turn' \
+        'do not stay solo by default' \
+        'one top-level plan item per explicit user task, with a short per-item breakdown' \
         'explicit user requirement' \
         'do not present unresolved work as complete' \
         'status requests are checkpoints, not stop signals' \
@@ -1565,7 +1619,8 @@ agent_config_has_required_runtime_guidance() {
         'reuse the same-role agent' \
         'keep the handoff bounded' \
         'interrupt=true' \
-        'terminal state before finalizing|wait[^\n]*terminal state'
+        'terminal state before finalizing|wait[^\n]*terminal state' \
+        'keep doing non-conflicting local work instead of idling'
 }
 
 # Validate a Codex skill directory for Codex-specific requirements and separation.
@@ -1870,29 +1925,11 @@ validate_codex_agent_config() {
     local skill_name=$1
     local home_agent_name=$2
     local config_file=$3
-    local expected_model="gpt-5.4"
-    local expected_reasoning="high"
+    local expected_reasoning="medium"
     local configured_model=""
-    local expected_override_model=""
     local expected_allow_implicit="true"
     local default_prompt_word_count=0
     local default_prompt_character_count=0
-
-    if [[ -f "$CODEX_TARGET/config.toml" ]]; then
-        local detected_model
-        detected_model=$(awk -F'"' '/^model = / {print $2; exit}' "$CODEX_TARGET/config.toml")
-        if [[ -n "$detected_model" ]]; then
-            expected_model="$detected_model"
-        fi
-
-        local detected_reasoning
-        detected_reasoning=$(awk -F'"' '/^model_reasoning_effort = / {print $2; exit}' "$CODEX_TARGET/config.toml")
-        if [[ -n "$detected_reasoning" ]]; then
-            expected_reasoning="$detected_reasoning"
-        fi
-    fi
-
-    expected_override_model="$(spark_override_model_for_home_agent "$home_agent_name" 2>/dev/null || true)"
     expected_reasoning="$(expected_reasoning_for_home_agent "$home_agent_name" "$expected_reasoning")"
 
     if grep -q "^model:" "$config_file"; then
@@ -1966,8 +2003,13 @@ validate_codex_agent_config() {
         return 1
     fi
 
-    if [[ "$skill_name" == "memory-status-reporter" ]] && { ! grep -q "tool-use mistakes" "$config_file" || ! grep -q "patterns were rewarded" "$config_file" || ! grep -q "research-cache items look stale" "$config_file"; }; then
-        print_error "Memory status prompt must mention tool-use mistakes, rewarded patterns, and research cache health: $skill_name"
+    if [[ "$skill_name" == "memory-status-reporter" ]] && { ! grep -q "tool-use mistakes" "$config_file" || ! grep -q "patterns were rewarded" "$config_file" || ! grep -q "research-cache items look stale" "$config_file" || ! grep -q "act as the memory writer" "$config_file" || ! grep -q "report what changed" "$config_file" || ! grep -q "verify the touched memory files are clean and in sync" "$config_file"; }; then
+        print_error "Memory status prompt must mention tool-use mistakes, rewarded patterns, research cache health, and memory-writer reporting: $skill_name"
+        return 1
+    fi
+
+    if [[ "$skill_name" == "git-expert" ]] && { ! grep -q "configured Git author identity" "$config_file" || ! grep -q "git config user.name" "$config_file" || ! grep -q "git config user.email" "$config_file"; }; then
+        print_error "Git prompt must preserve configured Git author identity: $skill_name"
         return 1
     fi
 
@@ -2095,12 +2137,12 @@ validate_codex_guidance_file() {
             return 1
         fi
 
-        if ! grep -qi "Do not pin a specific model inside ordinary root Codex" "$file" || ! grep -qi "Home agent TOMLs should inherit model and reasoning from the main config" "$file" || ! grep -qi "cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly" "$file"; then
-            print_error "Missing root model-inheritance or runtime model-selection boundary policy in AGENTS.md"
+        if ! grep -qi "Do not pin a specific model inside ordinary root Codex" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "gpt-5.3-codex-spark" "$file" || ! grep -qi 'reasoning_effort: "high"' "$file" || ! grep -qi "cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly" "$file"; then
+            print_error "Missing model-split, local-override, or runtime model-selection boundary policy in AGENTS.md"
             return 1
         fi
 
-        if ! grep -qi "every explicit user requirement" "$file" || ! grep -qi "Do not present unresolved work as complete" "$file" || ! grep -qi "does not suspend execution when fixable in-scope work remains" "$file"; then
+        if ! grep -qi "every explicit user requirement" "$file" || ! grep -qi "Do not present unresolved work as complete" "$file" || ! grep -qi "does not suspend execution when fixable in-scope work remains" "$file" || ! grep -qi "do not stay solo by default" "$file" || ! grep -qi "one top-level plan item per explicit user task" "$file" || ! grep -qi "per-item breakdown" "$file"; then
             print_error "Missing completion reconciliation or no-soft-stop enforcement in AGENTS.md"
             return 1
         fi
@@ -2119,15 +2161,15 @@ validate_codex_guidance_file() {
             print_error "Missing scoped-memory or research-cache helper workflow in README.md"
             return 1
         fi
-        if ! grep -qi "sync-skills.ps1" "$file" || ! grep -qi "delegates to `sync-skills.sh`" "$file" || ! grep -qi "Git Bash on Windows" "$file" || ! grep -qi "runtime-guardrails-and-memory-protocols.md" "$file"; then
-            print_error "Missing Windows wrapper, Git Bash, or runtime-guardrails documentation in README.md"
+        if ! grep -qi "sync-skills.ps1" "$file" || ! grep -qi "delegates to `sync-skills.sh`" "$file" || ! grep -qi "Git Bash on Windows" "$file" || ! grep -qi "runtime-guardrails-and-memory-protocols.md" "$file" || ! grep -qi "do not stay solo by default" "$file" || ! grep -qi "top-level plan item per explicit user task" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "memory writer" "$file"; then
+            print_error "Missing Windows wrapper, runtime-guardrails, local-override, or memory-writer documentation in README.md"
             return 1
         fi
     fi
 
     if [[ "$(basename "$file")" == "00-skill-routing-and-escalation.md" ]]; then
-        if ! grep -qi "Reuse Fresh Research First" "$file" || ! grep -qi "Fix The Next Bug Too" "$file" || ! grep -qi "Requirement Reconciliation Before Close" "$file" || ! grep -qi "Status Requests Do Not End The Job" "$file" || ! grep -qi "Write Corrections Before Responding" "$file" || ! grep -qi "Resolve workspace-scoped memory first" "$file" || ! grep -qi "agent-instance lane" "$file"; then
-            print_error "Missing cache-first, no-soft-stop, WAL, or autonomy routing defaults in 00-skill-routing-and-escalation.md"
+        if ! grep -qi "Reuse Fresh Research First" "$file" || ! grep -qi "Fix The Next Bug Too" "$file" || ! grep -qi "Requirement Reconciliation Before Close" "$file" || ! grep -qi "Status Requests Do Not End The Job" "$file" || ! grep -qi "Write Corrections Before Responding" "$file" || ! grep -qi "Resolve workspace-scoped memory first" "$file" || ! grep -qi "agent-instance lane" "$file" || ! grep -qi "Use Solo Mode Deliberately" "$file" || ! grep -qi "Planning Defaults" "$file" || ! grep -qi "memory-status-reporter" "$file" || ! grep -qi "report what changed" "$file"; then
+            print_error "Missing cache-first, no-soft-stop, WAL, autonomy, or delegated-memory routing defaults in 00-skill-routing-and-escalation.md"
             return 1
         fi
     fi
@@ -2238,6 +2280,10 @@ run_repo_contract_tests() {
         "$CODEX_SOURCE/memory-status-reporter/scripts/memory_maintenance.py" \
         "$CODEX_SOURCE/memory-status-reporter/scripts/memory_status_report.py" \
         "$CODEX_SOURCE/memory-status-reporter/scripts/research_cache.py" \
+        "$CODEX_SOURCE/memory-status-reporter/scripts/completion_gate.py" \
+        "$CODEX_SOURCE/memory-status-reporter/scripts/agent_registry.py" \
+        "$CODEX_SOURCE/memory-status-reporter/scripts/agent_packets.py" \
+        "$CODEX_SOURCE/memory-status-reporter/scripts/loop_guard.py" \
         "$CODEX_SOURCE/ui-design-systems-and-responsive-interfaces/scripts/design_intelligence.py" \
         "$CODEX_SOURCE/tests/test_skill_pack_contracts.py" || return 1
 
@@ -2302,31 +2348,55 @@ sync_codex_home_agent_from_yaml() {
     local default_prompt
     local pinned_model
     local configured_reasoning
+    local local_override_model
+    local local_override_reasoning
+    local effective_model=""
+    local effective_reasoning=""
     default_prompt=$(extract_codex_openai_value "$openai_yaml_path" "default_prompt") || {
         print_error "Unable to extract default_prompt for $home_agent_name"
         return 1
     }
     pinned_model="$(extract_codex_openai_optional_value "$openai_yaml_path" "model")"
     configured_reasoning="$(extract_codex_openai_optional_value "$openai_yaml_path" "reasoning_effort")"
+    local_override_model="$(read_local_home_agent_override_value "$home_agent_name" "model")" || {
+        print_error "Unable to read local model override for $home_agent_name"
+        return 1
+    }
+    local_override_reasoning="$(read_local_home_agent_override_value "$home_agent_name" "reasoning_effort")" || {
+        print_error "Unable to read local reasoning override for $home_agent_name"
+        return 1
+    }
 
-    run_python - "$home_agent_file" "$default_prompt" "$pinned_model" "$configured_reasoning" <<'PY'
+    if [[ -n "$local_override_model" ]]; then
+        effective_model="$local_override_model"
+    else
+        effective_model="$pinned_model"
+    fi
+
+    if [[ -n "$local_override_reasoning" ]]; then
+        effective_reasoning="$local_override_reasoning"
+    elif [[ -n "$pinned_model" ]] && [[ -n "$configured_reasoning" ]]; then
+        effective_reasoning="$configured_reasoning"
+    fi
+
+    run_python - "$home_agent_file" "$default_prompt" "$effective_model" "$effective_reasoning" <<'PY'
 from pathlib import Path
 import sys
 
 home_agent_file = Path(sys.argv[1])
 default_prompt = sys.argv[2]
-pinned_model = sys.argv[3]
-configured_reasoning = sys.argv[4]
+effective_model = sys.argv[3]
+effective_reasoning = sys.argv[4]
 
 if "'''" in default_prompt:
     raise SystemExit("Triple single quotes are not supported inside developer_instructions")
 
 home_agent_file.parent.mkdir(parents=True, exist_ok=True)
 output_lines = []
-if pinned_model:
-    output_lines.append(f'model = "{pinned_model}"')
-if pinned_model and configured_reasoning:
-    output_lines.append(f'model_reasoning_effort = "{configured_reasoning}"')
+if effective_model:
+    output_lines.append(f'model = "{effective_model}"')
+if effective_reasoning:
+    output_lines.append(f'model_reasoning_effort = "{effective_reasoning}"')
 output_lines.append("developer_instructions = '''")
 output_lines.append(default_prompt)
 output_lines.append("'''")

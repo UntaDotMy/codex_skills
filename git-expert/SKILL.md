@@ -67,6 +67,7 @@ git push origin feature/new-feature
 ### Commit Best Practices
 - **Atomic**: One logical change per commit
 - **Descriptive**: Clear message explaining what and why
+- **Authorship**: Use the configured Git `user.name` and `user.email` for commit author identity; do not substitute assistant or tool branding for the author name
 - **Format**:
   ```
   Short summary (50 chars or less)
@@ -308,6 +309,8 @@ git gc                      # Garbage collection
 git config --global user.name "Your Name"
 git config --global user.email "your.email@example.com"
 ```
+
+When a repository already has a local or global Git identity configured, preserve that identity for commits instead of inventing a separate assistant author label.
 
 ### Useful Aliases
 ```bash

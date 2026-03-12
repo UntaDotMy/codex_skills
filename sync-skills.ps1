@@ -169,15 +169,16 @@ function Invoke-BootstrapDelegateFromRepository {
     )
 
     $delegateScriptPath = Join-Path $RepositoryPath $DelegateScriptName
+    $powershellHostPath = (Get-Process -Id $PID).Path
     if (-not (Test-Path $delegateScriptPath)) {
-        Write-Error "Staged bootstrap repository is missing $DelegateScriptName: $RepositoryPath"
+        Write-Error "Staged bootstrap repository is missing ${DelegateScriptName}: $RepositoryPath"
         Remove-BootstrapRuntimeRepository
         exit 1
     }
 
     Write-Host "[INFO] Using staged bootstrap repo: $RepositoryPath"
     try {
-        & $delegateScriptPath @DelegateArguments
+        & $powershellHostPath -NoProfile -ExecutionPolicy Bypass -File $delegateScriptPath @DelegateArguments
         return $LASTEXITCODE
     } finally {
         Remove-BootstrapRuntimeRepository
@@ -194,6 +195,69 @@ function Refresh-BootstrapEntryScriptFromRepo {
 
     $managedScriptPath = Join-Path $CurrentScriptRoot (Split-Path -Leaf $externalScriptPath)
     Sync-ExternalBootstrapScriptCopy -ExternalScriptPath $externalScriptPath -ManagedScriptPath $managedScriptPath
+}
+
+function Invoke-BashManagerFromRepository {
+    param(
+        [string]$RepositoryPath,
+        [string[]]$DelegateArguments
+    )
+
+    $gitBashCandidates = @(
+        (Join-Path $env:ProgramFiles "Git\\bin\\bash.exe"),
+        (Join-Path $env:ProgramW6432 "Git\\bin\\bash.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\\Git\\bin\\bash.exe")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    $gitBashPath = $gitBashCandidates | Select-Object -First 1
+    if (-not $gitBashPath) {
+        Write-Error "Git Bash was not found. Install Git for Windows or run sync-skills.sh from an existing Bash shell."
+        exit 1
+    }
+
+    $bashScriptPath = Join-Path $scriptRoot "sync-skills.sh"
+    if (-not (Test-Path $bashScriptPath)) {
+        Write-Error "sync-skills.sh was not found next to sync-skills.ps1."
+        exit 1
+    }
+
+    $previousProcessDirectory = [System.IO.Directory]::GetCurrentDirectory()
+    Push-Location $scriptRoot
+    [System.IO.Directory]::SetCurrentDirectory($scriptRoot)
+    try {
+        $ArgumentList = $DelegateArguments
+        & $gitBashPath $bashScriptPath @ArgumentList
+        return $LASTEXITCODE
+    } finally {
+        Pop-Location
+        [System.IO.Directory]::SetCurrentDirectory($previousProcessDirectory)
+    }
+}
+
+function Resolve-InteractiveMenuArguments {
+    while ($true) {
+        Write-Host ""
+        Write-Host "Codex Skill Manager"
+        Write-Host "  [1] Install - install the skill pack, or refresh changed repo-managed files when it is already installed"
+        Write-Host "  [2] Update  - check for manager/repo updates first, restart into the new script if needed, then update installed skills"
+        Write-Host "  [3] Status  - check manager version, self-update state, skill-pack update state, and wiring health"
+        Write-Host "  [4] Quit"
+        Write-Host ""
+
+        $menuChoice = Read-Host "select"
+        switch ($menuChoice) {
+            { $_ -in @('1', 'i', 'install') } { return @('install') }
+            { $_ -in @('2', 'u', 'update') } { return @('update') }
+            { $_ -in @('3', 'st', 'status') } { return @('status') }
+            { $_ -in @('4', 'q', 'quit') } {
+                Write-Host "[OK] Goodbye"
+                return @('__quit__')
+            }
+            default {
+                Write-Warning "Choose a valid option"
+            }
+        }
+    }
 }
 
 $script:CurrentBootstrapScriptPath = $MyInvocation.MyCommand.Path
@@ -229,34 +293,36 @@ if (-not (Test-RepositoryLayoutComplete -RepositoryPath $scriptRoot)) {
     $env:CODEX_BOOTSTRAP_RUNTIME_REPOSITORY_PERSISTENT = if (Test-BootstrapRepositoryPathIsPersistent) { "true" } else { "false" }
 
     Sync-ExternalBootstrapScriptCopy -ExternalScriptPath $currentScriptPath -ManagedScriptPath (Join-Path $runtimeRepositoryPath (Split-Path -Leaf $currentScriptPath))
-    if ($script:BootstrapExternalScriptRefreshResult -eq "refreshed") {
+    if (-not ($ArgumentList -and $ArgumentList.Count -gt 0)) {
+        $ArgumentList = Resolve-InteractiveMenuArguments
+        if ($ArgumentList[0] -eq '__quit__') {
+            Remove-BootstrapRuntimeRepository
+            exit 0
+        }
+    }
+    $hasDelegateArguments = $ArgumentList -and $ArgumentList.Count -gt 0
+    if ($script:BootstrapExternalScriptRefreshResult -eq "refreshed" -and $hasDelegateArguments) {
         Write-Host "[INFO] Restarting into the refreshed standalone entry script before continuing."
         & $currentScriptPath @ArgumentList
         exit $LASTEXITCODE
+    }
+
+    if (-not $hasDelegateArguments) {
+        $delegateExitCode = Invoke-BashManagerFromRepository -RepositoryPath $runtimeRepositoryPath -DelegateArguments $ArgumentList
+        Remove-BootstrapRuntimeRepository
+        exit $delegateExitCode
     }
 
     $delegateExitCode = Invoke-BootstrapDelegateFromRepository -RepositoryPath $runtimeRepositoryPath -DelegateScriptName "sync-skills.ps1" -DelegateArguments $ArgumentList
     exit $delegateExitCode
 }
 Refresh-BootstrapEntryScriptFromRepo -CurrentScriptRoot $scriptRoot
-$gitBashCandidates = @(
-    (Join-Path $env:ProgramFiles "Git\\bin\\bash.exe"),
-    (Join-Path $env:ProgramW6432 "Git\\bin\\bash.exe"),
-    (Join-Path $env:LOCALAPPDATA "Programs\\Git\\bin\\bash.exe")
-) | Where-Object { $_ -and (Test-Path $_) }
-
-$gitBashPath = $gitBashCandidates | Select-Object -First 1
-if (-not $gitBashPath) {
-    Write-Error "Git Bash was not found. Install Git for Windows or run sync-skills.sh from an existing Bash shell."
-    exit 1
+if (-not ($ArgumentList -and $ArgumentList.Count -gt 0)) {
+    $ArgumentList = Resolve-InteractiveMenuArguments
+    if ($ArgumentList[0] -eq '__quit__') {
+        exit 0
+    }
 }
-
-$bashScriptPath = Join-Path $scriptRoot "sync-skills.sh"
-if (-not (Test-Path $bashScriptPath)) {
-    Write-Error "sync-skills.sh was not found next to sync-skills.ps1."
-    exit 1
-}
-
-& $gitBashPath $bashScriptPath @ArgumentList
+$delegateExitCode = Invoke-BashManagerFromRepository -RepositoryPath $scriptRoot -DelegateArguments $ArgumentList
 Refresh-BootstrapEntryScriptFromRepo -CurrentScriptRoot $scriptRoot
-exit $LASTEXITCODE
+exit $delegateExitCode

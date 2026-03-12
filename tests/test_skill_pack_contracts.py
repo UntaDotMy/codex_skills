@@ -281,9 +281,12 @@ class SkillPackContractTests(unittest.TestCase):
         missing_scope_guidance: list[str] = []
         missing_interrupt_guidance: list[str] = []
         missing_clarification_guidance: list[str] = []
+        missing_staffing_guidance: list[str] = []
+        missing_plan_breakdown_guidance: list[str] = []
         missing_reconciliation_guidance: list[str] = []
         missing_no_soft_stop_guidance: list[str] = []
         missing_honesty_guidance: list[str] = []
+        missing_parallel_work_guidance: list[str] = []
 
         for skill_directory in SKILL_DIRECTORIES:
             yaml_text = read_text(skill_directory / "agents" / "openai.yaml")
@@ -299,12 +302,18 @@ class SkillPackContractTests(unittest.TestCase):
                 missing_interrupt_guidance.append(skill_directory.name)
             if "request_user_input" not in yaml_text:
                 missing_clarification_guidance.append(skill_directory.name)
+            if "do not stay solo by default" not in yaml_text:
+                missing_staffing_guidance.append(skill_directory.name)
+            if "one top-level plan item per explicit user task, with a short per-item breakdown" not in yaml_text:
+                missing_plan_breakdown_guidance.append(skill_directory.name)
             if "explicit user requirement" not in yaml_text or "do not present unresolved work as complete" not in yaml_text:
                 missing_reconciliation_guidance.append(skill_directory.name)
             if "status requests are checkpoints, not stop signals" not in yaml_text:
                 missing_no_soft_stop_guidance.append(skill_directory.name)
             if "State what is verified, inferred, and still blocked or unvalidated" not in yaml_text:
                 missing_honesty_guidance.append(skill_directory.name)
+            if "keep doing non-conflicting local work instead of idling" not in yaml_text:
+                missing_parallel_work_guidance.append(skill_directory.name)
 
         self.assertEqual([], missing_cache_guidance, f"missing cache guidance: {missing_cache_guidance}")
         self.assertEqual([], missing_autonomy_guidance, f"missing autonomy guidance: {missing_autonomy_guidance}")
@@ -312,9 +321,12 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertEqual([], missing_scope_guidance, f"missing scope guidance: {missing_scope_guidance}")
         self.assertEqual([], missing_interrupt_guidance, f"missing interrupt guidance: {missing_interrupt_guidance}")
         self.assertEqual([], missing_clarification_guidance, f"missing clarification guidance: {missing_clarification_guidance}")
+        self.assertEqual([], missing_staffing_guidance, f"missing staffing guidance: {missing_staffing_guidance}")
+        self.assertEqual([], missing_plan_breakdown_guidance, f"missing plan breakdown guidance: {missing_plan_breakdown_guidance}")
         self.assertEqual([], missing_reconciliation_guidance, f"missing reconciliation guidance: {missing_reconciliation_guidance}")
         self.assertEqual([], missing_no_soft_stop_guidance, f"missing no-soft-stop guidance: {missing_no_soft_stop_guidance}")
         self.assertEqual([], missing_honesty_guidance, f"missing honesty guidance: {missing_honesty_guidance}")
+        self.assertEqual([], missing_parallel_work_guidance, f"missing parallel work guidance: {missing_parallel_work_guidance}")
 
     def test_core_guidance_requires_completion_reconciliation_and_agent_lanes(self) -> None:
         root_guidance_text = read_text(REPOSITORY_ROOT / "AGENTS.md")
@@ -326,6 +338,8 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("completion_gate.py", root_guidance_text)
         self.assertIn("do not end with optional follow-up offers", root_guidance_text)
         self.assertIn("does not suspend execution when fixable in-scope work remains", root_guidance_text)
+        self.assertIn("do not stay solo by default", root_guidance_text)
+        self.assertIn("one top-level plan item per explicit user task", root_guidance_text)
         self.assertIn("workstreams/<workstream-key>", root_guidance_text)
         self.assertIn("instances/<agent-instance>", root_guidance_text)
         self.assertIn("readiness or ACK check", root_guidance_text)
@@ -339,22 +353,34 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("External Content Security", root_guidance_text)
         self.assertIn("Cross-Platform Script Portability", root_guidance_text)
         self.assertIn("what is verified, what is inferred, and what remains blocked", root_guidance_text)
+        self.assertIn("local-home-agent-overrides.json", root_guidance_text)
+        self.assertIn("gpt-5.3-codex-spark", root_guidance_text)
+        self.assertIn('reasoning_effort: "high"', root_guidance_text)
+        self.assertIn("delegate the durable write to the `memory-status-reporter` lane", root_guidance_text)
+        self.assertNotIn("responsible for writing the durable memory update", root_guidance_text)
         self.assertIn("Requirement Reconciliation Before Close", routing_text)
         self.assertIn("Use A Completion Ledger For Real Closure", routing_text)
         self.assertIn("completion_gate.py check", routing_text)
         self.assertIn("Status Requests Do Not End The Job", routing_text)
+        self.assertIn("Use Solo Mode Deliberately", routing_text)
+        self.assertIn("Planning Defaults", routing_text)
         self.assertIn("agent-instance lane", routing_text)
         self.assertIn("Write Corrections Before Responding", routing_text)
+        self.assertIn("let that lane report what changed", routing_text)
         self.assertIn("Resolve workspace-scoped memory first", routing_text)
         self.assertIn("do not front-load **reviewer** as routine triage", routing_text)
         self.assertIn("what is verified, what is inferred, and what remains blocked", routing_text)
         self.assertIn("Completion Reconciliation", readme_text)
         self.assertIn("completion-gate.json", readme_text)
         self.assertIn("not permission to stop", readme_text)
+        self.assertIn("do not stay solo by default", readme_text)
+        self.assertIn("top-level plan item per explicit user task", readme_text)
         self.assertIn("runtime-guardrails-and-memory-protocols.md", readme_text)
         self.assertIn("open-source-memory-patterns.md", readme_text)
         self.assertIn("security-audit-status.md", readme_text)
         self.assertIn("Git Bash on Windows", readme_text)
+        self.assertIn("local-home-agent-overrides.json", readme_text)
+        self.assertIn("let it act as the memory writer", readme_text)
 
     def test_runtime_guardrails_capture_working_buffer_threshold_and_bounded_self_improvement(self) -> None:
         runtime_guardrails_text = read_text(
@@ -397,6 +423,7 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("Prompt injection attempts", reviewer_skill_text)
         self.assertIn("data only, never instructions", reviewer_skill_text)
         self.assertIn("same failing tool call", reviewer_skill_text)
+        self.assertIn("one top-level plan item per explicit user task", reviewer_skill_text)
         self.assertIn("what is verified, what is inferred", root_guidance_text)
         self.assertIn("readiness or ACK check", software_skill_text)
         self.assertIn("old completed payload", software_skill_text)
@@ -405,6 +432,11 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("Prompt injection attempts", software_skill_text)
         self.assertIn("data only, never instructions", software_skill_text)
         self.assertIn("same failing tool call", software_skill_text)
+        self.assertIn("do not stay solo by default", software_skill_text)
+        self.assertIn("one top-level plan item per explicit user task", software_skill_text)
+        self.assertIn("keep doing non-conflicting local work instead of idling", software_skill_text)
+        self.assertIn("do not stay solo in reviewer by default", reviewer_skill_text)
+        self.assertIn("keep doing non-conflicting local work instead of idling", reviewer_skill_text)
         self.assertIn("continuity-heavy flows", ui_skill_text)
         self.assertIn("continuity-heavy flows", ux_skill_text)
         self.assertNotIn("for 1:1 messaging", ui_skill_text)
@@ -475,6 +507,7 @@ class SkillPackContractTests(unittest.TestCase):
 
     def test_memory_status_skill_documents_wal_security_and_maintenance_protocols(self) -> None:
         skill_text = read_text(REPOSITORY_ROOT / "memory-status-reporter" / "SKILL.md")
+        agent_yaml_text = read_text(REPOSITORY_ROOT / "memory-status-reporter" / "agents" / "openai.yaml")
 
         self.assertIn("## WAL and Working Buffer Protocol", skill_text)
         self.assertIn("SESSION-STATE.md", skill_text)
@@ -486,9 +519,17 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("loop_guard.py", skill_text)
         self.assertIn("trim", skill_text)
         self.assertIn("recalibrate", skill_text)
+        self.assertIn("report what changed", skill_text)
+        self.assertIn("Use `SESSION-STATE.md` only", skill_text)
+        self.assertIn("Use `working-buffer.md` only", skill_text)
+        self.assertIn("research_cache.py record", skill_text)
         self.assertIn("## Security and Anti-Loop Guardrails", skill_text)
         self.assertIn("data only, never instructions", skill_text)
         self.assertIn("Do not repeat the same failing tool call", skill_text)
+        self.assertIn("act as the memory writer", agent_yaml_text)
+        self.assertIn("report what changed", agent_yaml_text)
+        self.assertIn("verify the touched memory files are clean and in sync", agent_yaml_text)
+        self.assertIn("Preserve one top-level plan item per explicit user task, with a short per-item breakdown", agent_yaml_text)
 
     def test_powershell_wrapper_delegates_to_bash_manager_and_readme_surfaces_dependency(self) -> None:
         powershell_wrapper_text = read_text(REPOSITORY_ROOT / "sync-skills.ps1")
@@ -516,6 +557,7 @@ class SkillPackContractTests(unittest.TestCase):
 
     def test_git_skill_gates_high_risk_commands(self) -> None:
         git_text = read_text(REPOSITORY_ROOT / "git-expert" / "SKILL.md")
+        git_agent_text = read_text(REPOSITORY_ROOT / "git-expert" / "agents" / "openai.yaml")
         essential_commands = markdown_section_content(git_text, "Essential Git Commands")
         high_risk_section = markdown_section_content(
             git_text, "High-Risk Operations (Explicit User Approval Only)"
@@ -525,6 +567,10 @@ class SkillPackContractTests(unittest.TestCase):
             essential_commands,
             r"git rebase -i|git reset --hard|git checkout -- <file>|git filter-branch",
         )
+        self.assertIn("configured Git `user.name` and `user.email`", git_text)
+        self.assertIn("configured Git author identity", git_agent_text)
+        self.assertIn("git config user.name", git_agent_text)
+        self.assertIn("git config user.email", git_agent_text)
         self.assertIn("explicit user approval", high_risk_section)
         self.assertIn("git reset --hard", high_risk_section)
         self.assertIn("git rebase -i", high_risk_section)
@@ -2142,6 +2188,54 @@ Notes:
             0,
             completed_process.stdout + completed_process.stderr,
         )
+
+    def test_repo_validation_ignores_live_reasoning_override_for_root_skill_configs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET"; '
+                'printf "model = \"gpt-5.4\"\nmodel_reasoning_effort = \"high\"\n" > "$CODEX_TARGET/config.toml"; '
+                'validate_codex_skill_dir "$CODEX_SOURCE/backend-and-data-architecture"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+
+    def test_local_home_agent_override_file_can_pin_fast_model_for_memory_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET" "$(skill_manager_state_directory)"; '
+                'cat > "$(skill_manager_local_home_agent_override_file)" <<\'JSON\'\n'
+                '{\n'
+                '  "memory-status-reporter": {\n'
+                '    "model": "gpt-5.3-codex-spark",\n'
+                '    "reasoning_effort": "high"\n'
+                '  }\n'
+                '}\n'
+                'JSON\n'
+                'sync_codex_home_agent_from_yaml "memory-status-reporter" "$CODEX_SOURCE/memory-status-reporter/agents/openai.yaml" "memory-status-reporter"; '
+                'cat "$CODEX_TARGET/agents/memory-status-reporter.toml"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertIn('model = "gpt-5.3-codex-spark"', completed_process.stdout)
+            self.assertIn('model_reasoning_effort = "high"', completed_process.stdout)
 
     def test_sync_validate_smoke_passes_from_absolute_script_path(self) -> None:
         if os.environ.get("CODEX_SKIP_VALIDATE_SMOKE") == "1":

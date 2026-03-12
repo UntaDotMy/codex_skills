@@ -10,10 +10,11 @@ This file provides guidance for Codex CLI on when to use skills and multi-agent 
 
 When no skill is explicitly mentioned:
 1. Route directly to the primary domain skill when the task clearly belongs to one surface
-2. Use `software-development-life-cycle` when the work is mainly sequencing, cross-domain planning, or architecture framing
-3. Start with `reviewer` only for audits, production-readiness checks, explicit gap-finding, or final validation
-4. Return to `reviewer` for the final quality check when a separate implementation skill owned the work
-5. Be honest in user-facing reporting: state what is verified, what is inferred, and what remains blocked, partial, or unvalidated
+2. If a non-trivial task clearly belongs to one specialist surface, do not stay solo by default; load that skill or hand the concrete lane to it before the main agent absorbs the whole job alone
+3. Use `software-development-life-cycle` when the work is mainly sequencing, cross-domain planning, or architecture framing
+4. Start with `reviewer` only for audits, production-readiness checks, explicit gap-finding, or final validation
+5. Return to `reviewer` for the final quality check when a separate implementation skill owned the work
+6. Be honest in user-facing reporting: state what is verified, what is inferred, and what remains blocked, partial, or unvalidated
 
 ### Specialist Skills
 
@@ -30,7 +31,7 @@ Load specialist skills when the task clearly requires domain expertise:
 - **ui-design-systems-and-responsive-interfaces**: Design systems, responsive UI
 - **ux-research-and-experience-strategy**: UX research, user testing
 - **git-expert**: Complex git operations, branching strategy
-- **memory-status-reporter**: Memory health, daily learnings, mistake ledgers, and heuristic status reporting
+- **memory-status-reporter**: Memory health, daily learnings, mistake ledgers, heuristic status reporting, and delegated durable memory writes
 
 ### Keep It Simple
 
@@ -81,17 +82,18 @@ Don't force multi-agent for:
 
 When multi-agent is used, adhere to the following collaboration lifecycle to avoid "workaround" solutions and ensure high performance:
 1. **Brainstorming & Parallelism**: Spawn sub-agents for independent tasks or to parallelize research and ideation. 
-2. **Context Pruning (CRITICAL)**: Default `fork_context=false`. The upstream Codex `spawn_agent` contract defines `fork_context=true` as forking the current thread history into the new agent, so it copies parent context and can increase startup tokens, latency, and cost as the thread grows. Use `fork_context=true` only when the child truly needs the exact parent history. Otherwise, the main agent MUST summarize the current state and provide only the absolute necessary file paths, decisions, and context to the sub-agent. Before `send_input` or `spawn_agent`, prepare a robust handoff packet that covers the exact objective, constraints, relevant file paths, current findings, validation state, non-goals, and expected output.
-3. **Execution & Feedback**: Sub-agents do not just execute blindly; they should collaborate. For complex fixes, sub-agents should propose the idea ("is it okay to implement like this?") before committing extensive code.
-4. **Manager-Brokered Agent Feedback**: If agent-to-agent challenge or review is useful, keep the main agent in the loop and relay concise packets through it instead of replaying the full transcript to every child. Prefer explicit peer-feedback turns over unstructured cross-talk.
-5. **Synthesis & Handoff**: Upon completion, a sub-agent MUST return both a **concise summary** and the **detailed context/findings** back to the main agent. 
-6. **Main Agent Verification**: The main orchestrating agent MUST formally verify the sub-agent's findings against the original objective. If the work is incomplete or flawed, the main agent will send feedback and instruct the sub-agent to fix it.
-7. **Wait Operations**: Wait on multiple agent IDs in one `wait` call instead of serial waits. Use a meaningful timeout for the task size rather than tight polling, do non-overlapping work before waiting again, and prefer one longer wait over many short waits. Never use `send_input(..., interrupt=true)` to hurry a required sub-agent; interruption is for explicit user cancellation or redirection only.
-8. **Required Completion**: If a spawned sub-agent is materially required for the task, the main agent MUST wait for it to reach a terminal state before finalizing. A sub-agent spawned for independent review, independent verification, or final-gap confirmation is required by default unless the user explicitly cancels or redirects that work. Do not silently ignore, abandon, or interrupt a required sub-agent because it is slow, because local evidence looks "good enough," or because the main agent is no longer blocked. If a `wait` call times out, increase the timeout, continue useful non-overlapping work, and wait again unless the user explicitly cancels or redirects the work.
-9. **Lifecycle & Reuse**: Within the same project or workstream, keep at most one live sub-agent per role by default (for example, one `reviewer`). Maintain a lightweight per-project spawned-agent list keyed by role or workstream, check that list before every `spawn_agent` call, and update it whenever an agent is resumed or closed. If a same-role agent already exists, never spawn a second same-role sub-agent if one already exists for that same workstream. Always reuse it with `send_input` or `resume_agent`; if it was closed, use `resume_agent` followed by `send_input`. Resume the closed same-role agent before considering any new spawn. Close a sub-agent only when that role is no longer needed for the current project or during final cleanup, and keep reusable reviewer or verification agents open when another pass is likely in the same workstream. Never close a required sub-agent while its status is still running or queued, and do not leave parallel processes running indefinitely.
-10. **Reuse Handshake and Recovery**: When reusing a resumed or previously completed same-role sub-agent for new work, first send a short readiness or ACK check and wait for a fresh response before trusting that lane with the full task. Do not mistake an old completed payload for the new task result. If reuse returns stale output, mismatched workstream context, or a transport failure such as raw HTML or HTTP 4xx or 5xx content, treat that lane as unhealthy, stop forwarding its raw payload to the user, update the spawned-agent list, and replace it with one fresh same-role agent for that workstream instead of hammering the broken lane.
-11. **Parallel Reviewer Exception**: When the user explicitly asks for parallel reviewer validation, or when independent verification materially improves confidence, the main agent may spawn multiple `reviewer` sub-agents as separate lanes. Each reviewer lane must have a distinct purpose or workstream label, the main agent must wait for every required reviewer lane, must verify every reviewer output before acting, and may send updated work back for another review round after implementation changes.
-12. **Performance Awareness & Delegation Thresholds (Solving the Bottleneck)**:
+2. **Skill-First Staffing**: When a non-trivial task has a clear specialist surface or independent verification lane, do not keep every lane in the main agent by habit. Route to the owning skill and staff bounded sub-agents for the lanes that can safely progress in parallel.
+3. **Context Pruning (CRITICAL)**: Default `fork_context=false`. The upstream Codex `spawn_agent` contract defines `fork_context=true` as forking the current thread history into the new agent, so it copies parent context and can increase startup tokens, latency, and cost as the thread grows. Use `fork_context=true` only when the child truly needs the exact parent history. Otherwise, the main agent MUST summarize the current state and provide only the absolute necessary file paths, decisions, and context to the sub-agent. Before `send_input` or `spawn_agent`, prepare a robust handoff packet that covers the exact objective, constraints, relevant file paths, current findings, validation state, non-goals, and expected output.
+4. **Execution & Feedback**: Sub-agents do not just execute blindly; they should collaborate. For complex fixes, sub-agents should propose the idea ("is it okay to implement like this?") before committing extensive code.
+5. **Manager-Brokered Agent Feedback**: If agent-to-agent challenge or review is useful, keep the main agent in the loop and relay concise packets through it instead of replaying the full transcript to every child. Prefer explicit peer-feedback turns over unstructured cross-talk.
+6. **Synthesis & Handoff**: Upon completion, a sub-agent MUST return both a **concise summary** and the **detailed context/findings** back to the main agent. 
+7. **Main Agent Verification**: The main orchestrating agent MUST formally verify the sub-agent's findings against the original objective. If the work is incomplete or flawed, the main agent will send feedback and instruct the sub-agent to fix it.
+8. **Wait Operations**: Wait on multiple agent IDs in one `wait` call instead of serial waits. Use a meaningful timeout for the task size rather than tight polling, do non-overlapping work before waiting again, and prefer one longer wait over many short waits. Never use `send_input(..., interrupt=true)` to hurry a required sub-agent; interruption is for explicit user cancellation or redirection only.
+9. **Required Completion**: If a spawned sub-agent is materially required for the task, the main agent MUST wait for it to reach a terminal state before finalizing. A sub-agent spawned for independent review, independent verification, or final-gap confirmation is required by default unless the user explicitly cancels or redirects that work. Do not silently ignore, abandon, or interrupt a required sub-agent because it is slow, because local evidence looks "good enough," or because the main agent is no longer blocked. If a `wait` call times out, increase the timeout, continue useful non-overlapping work, and wait again unless the user explicitly cancels or redirects the work.
+10. **Lifecycle & Reuse**: Within the same project or workstream, keep at most one live sub-agent per role by default (for example, one `reviewer`). Maintain a lightweight per-project spawned-agent list keyed by role or workstream, check that list before every `spawn_agent` call, and update it whenever an agent is resumed or closed. If a same-role agent already exists, never spawn a second same-role sub-agent if one already exists for that same workstream. Always reuse it with `send_input` or `resume_agent`; if it was closed, use `resume_agent` followed by `send_input`. Resume the closed same-role agent before considering any new spawn. Close a sub-agent only when that role is no longer needed for the current project or during final cleanup, and keep reusable reviewer or verification agents open when another pass is likely in the same workstream. Never close a required sub-agent while its status is still running or queued, and do not leave parallel processes running indefinitely.
+11. **Reuse Handshake and Recovery**: When reusing a resumed or previously completed same-role sub-agent for new work, first send a short readiness or ACK check and wait for a fresh response before trusting that lane with the full task. Do not mistake an old completed payload for the new task result. If reuse returns stale output, mismatched workstream context, or a transport failure such as raw HTML or HTTP 4xx or 5xx content, treat that lane as unhealthy, stop forwarding its raw payload to the user, update the spawned-agent list, and replace it with one fresh same-role agent for that workstream instead of hammering the broken lane.
+12. **Parallel Reviewer Exception**: When the user explicitly asks for parallel reviewer validation, or when independent verification materially improves confidence, the main agent may spawn multiple `reviewer` sub-agents as separate lanes. Each reviewer lane must have a distinct purpose or workstream label, the main agent must wait for every required reviewer lane, must verify every reviewer output before acting, and may send updated work back for another review round after implementation changes.
+13. **Performance Awareness & Delegation Thresholds (Solving the Bottleneck)**:
    - **The Bottleneck Risk**: Spawning, forking context, and terminating sub-agents introduces overhead. If the main agent spawns 5 sub-agents to fix a typo in 5 different files, the systemic overhead will be much slower than executing the tasks natively.
    - **Batching over Spawning**: For repetitive, mechanical, or straightforward tasks (e.g., simple file edits, lint fixes, renaming), the main orchestrating agent MUST execute these natively by batching Codex-native work (for example, one `exec_command` over multiple paths or one `js_repl` step that uses `codex.tool(...)` across a batch) rather than spawning sub-agents.
    - **The Delegation Threshold**: Only spawn a sub-agent if the task meets one of these criteria:
@@ -100,7 +102,7 @@ When multi-agent is used, adhere to the following collaboration lifecycle to avo
      - It requires specialized domain expertise (e.g., handing off a complex IaC terraform setup to the `cloud-and-devops-expert`).
  - **Single-Worker Batching**: If a rote task is too large for the main agent (e.g., refactoring 50 files), delegate the *entire* batch to a SINGLE `worker` or `default` sub-agent to process sequentially or via scripts, rather than spawning 50 individual agents.
  - **Runtime Fallback**: If child-agent controls are unavailable in the active Codex runtime, stay single-agent or use read-only parallel discovery only; do not write instructions that assume unavailable controls.
-13. **Parallel Main-Agent Throughput**: The main agent should keep working while sub-agents handle non-conflicting tasks. Split work by disjoint write scope or read-only scope, keep the main agent on useful local work, and resolve any ownership conflict before dispatch so parallel work never wastes tokens or money.
+14. **Parallel Main-Agent Throughput**: Before the next `wait`, identify the main agent's next non-conflicting local lane and keep doing that work instead of idling. Split work by disjoint write scope or read-only scope, keep the main agent on useful local work, and resolve any ownership conflict before dispatch so parallel work never wastes tokens or money.
 
 ### Agent Profiles
 
@@ -139,6 +141,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 
 **Before research, planning, or implementation:**
 - Translate the raw user prompt into a concrete working brief.
+- For multi-part asks, preserve the user's explicit task list in that brief so the main plan can mirror it 1:1 instead of collapsing several asks into one vague bucket.
 - Identify the user story, desired outcome, constraints, non-goals, acceptance criteria, edge cases, and validation plan.
 - For tooling, automation, CLIs, installers, updaters, or operational workflows, include the relevant lifecycle scenarios in that brief: first use, repeat use, upgrade path, interruption or partial state, rollback or recovery, and local-state conflicts where applicable.
 - For workflow validation, prove behavior from the execution contexts users actually depend on, not only from the source checkout.
@@ -194,8 +197,9 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 - **Future-agent Reuse:** Future agents must check this indexed memory to skip redundant research.
 - **Layered Memory:** Keep memory layered the way a human would: high-level reusable guidance in summaries, task-family patterns in indexed memory, workspace-scoped notes under `~/.codex/memories/workspaces/<workspace-slug>/`, workstream notes under `~/.codex/memories/workspaces/<workspace-slug>/workstreams/<workstream-key>/`, role-local notes under `~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/`, agent-instance notes under `~/.codex/memories/agents/<role>/<workspace-slug>/workstreams/<workstream-key>/instances/<agent-instance>/`, research-cache findings with freshness metadata, and exact commands/errors/evidence only in deeper task-specific notes when they are reusable.
 - **L1 L2 L3 Memory Map:** Treat the small always-read workspace guidance, summaries, `SESSION-STATE.md`, and `working-buffer.md` as L1 brain files; keep scoped `memory/` lanes as L2 working memory; keep deeper SOPs, playbooks, and scoped `reference/` material as L3 reference opened on demand. One home per fact, and information should flow down instead of being duplicated across every layer.
-- **WAL Protocol:** Scan every new user message for corrections, decisions, proper nouns, preferences, and specific values that must survive compaction. If any appear, write them to scoped session state before responding. The default durable targets are `~/.codex/memories/workspaces/<workspace-slug>/workstreams/<workstream-key>/memory/SESSION-STATE.md` and the append-only `session-wal.jsonl` beside it.
+- **WAL Protocol:** Scan every new user message for corrections, decisions, proper nouns, preferences, and specific values that must survive compaction. If any appear, delegate the durable write to the `memory-status-reporter` lane when that lane is available, have it update scoped session state, and validate the touched memory files before responding. The default durable targets are `~/.codex/memories/workspaces/<workspace-slug>/workstreams/<workstream-key>/memory/SESSION-STATE.md` and the append-only `session-wal.jsonl` beside it.
 - **Working Buffer Rule:** When context pressure gets high or a task is still unfolding across multiple turns, append fresh breadcrumbs to `working-buffer.md` before context gets compacted away. Read the working buffer back after resets before assuming the previous turn state is still intact.
+- **Memory Write Triggers:** Use `SESSION-STATE.md` only for durable corrections, decisions, names, preferences, exact values, or confirmed constraints. Use `working-buffer.md` only for long-running or high-context work. Use `research_cache.py`, `completion_gate.py`, and `agent_registry.py` only when reusable research, tracked closure, or same-role reuse is actually in play.
 - **Scope-First Memory Rule:** Resolve the current workspace and role scope before loading memory broadly. Read the scoped workspace or role files first, then recent matching rollout summaries, then global durable memory only for the missing context. Do not replay all memory files by default.
 - **Distinct Agent Memory Lanes:** Reused agents should keep the same workstream and agent-instance lane so they can resume with bounded context. Open a new lane only when the workstream meaningfully changes.
 - **Reinforcement Memory (Reward/Penalty Loop):** Promote validated winning approaches into rewarded patterns, and promote repeated mistakes, disproven assumptions, or stale cached findings into penalty patterns so future work knows what to prefer, avoid, or refresh.
@@ -203,7 +207,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 - **Stale Memory Handling:** Do not delete old memory silently. Mark stale findings stale or superseded, move noisy historical material into archive paths when needed, and prefer refreshed scoped notes over replaying old global context.
 - **Trim Protocol:** Run periodic trim passes for L1 files so each file stays roughly within 500 to 1,000 tokens and the active L1 total stays under about 7,000 tokens. Archive overflow instead of deleting it.
 - **Recalibrate Protocol:** Re-read the current L1 files from disk, compare recent observed behavior against those canonical rules, and report drift candidates plus corrections before long-running work keeps compounding stale assumptions.
-- **Main-Agent Responsibility:** Before non-trivial work, the main agent MUST read relevant memory. After non-trivial work, the main agent MUST consolidate durable learnings, rewarded patterns, penalty patterns, validation paths, and failure shields into persistent memory so future agents stay aligned. Sub-agents may discover learnings, but the main agent is responsible for writing the durable memory update.
+- **Main-Agent Responsibility:** Before non-trivial work, the main agent MUST read relevant memory. After non-trivial work, the main agent MUST ensure durable learnings, rewarded patterns, penalty patterns, validation paths, and failure shields are consolidated into persistent memory so future agents stay aligned. Sub-agents may discover learnings, but when durable memory must change the main agent should delegate the write to the `memory-status-reporter` lane when available, then verify the touched memory files before closing.
 - **Tool Mistakes Count:** If a tool call fails or is misused in a way that teaches a reusable lesson, record the tool name, failure symptom, cause, verified fix, and prevention note in the rollout summary and durable memory.
 - **Freshness Rule:** Cache durable architecture guidance longer, but mark date-sensitive research, vendor behavior, pricing, version caveats, and workaround findings with freshness notes so they can be refreshed instead of trusted forever.
 - **Autonomy Rule:** Do not stop at the first bug uncovered by validation. If the next issue is in scope and fixable, keep iterating in the same turn until the flow is clean or truly blocked.
@@ -223,6 +227,8 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 **All tasks require planning** - no exceptions:
 - What will be changed and why
 - Which explicit working brief or user story is being implemented
+- For multi-part requests, preserve one top-level plan item per explicit user task or deliverable instead of collapsing several asks into one vague step
+- Give each top-level item its own breakdown, validation target, dependencies or owners, and any specialist-skill or sub-agent handoff before implementation begins
 - How it will be validated
 - What could go wrong
 - Which lifecycle and recovery scenarios must still work beyond the happy path, especially for tooling or operational flows
@@ -230,6 +236,7 @@ Use appropriate profiles based on task needs, but don't over-complicate.
 
 **Exit criteria:**
 - Clear implementation plan (1-3 sentences minimum)
+- Multi-part requests keep one top-level plan item per explicit user task with a per-item breakdown before implementation
 - Validation strategy defined
 - Risks identified
 
@@ -673,19 +680,27 @@ Before the final answer, perform a completion reconciliation pass. Do not descri
 
 ## Reasoning Effort Levels
 
-Your agent profiles follow the workspace default reasoning effort:
-- **high**: Main agent baseline used across the synced skill pack
+Use a split-lane model instead of forcing every agent to mirror the main lane:
+- **high**: Main-agent slow lane for cross-layer root-cause debugging, risky refactors, security-sensitive changes, architecture pivots, and final synthesis
+- **medium**: Repo-managed specialist baseline used across the synced skill pack to keep specialist sub-agents responsive while preserving solid planning quality
+- **optional fast lane**: Use an explicit local home-agent override only for bounded helper work such as workspace exploration, file inventories, symbol maps, memory writes, research-cache lookup or record, completion-gate maintenance, and status or diff summaries when the runtime exposes a faster model such as `gpt-5.3-codex-spark` with `reasoning_effort: "high"`
 
-Codex CLI should keep the same reasoning baseline as the main agent unless the user explicitly asks for a different global default.
+Codex CLI does not need to mirror the main agent's strongest lane across every specialist. Keep the slow lane for the main agent or final gate, keep repo-managed specialists at `medium`, and opt into a faster helper lane only with an explicit local override.
 
 ## Skill Model Policy
 
 - Do not pin a specific model inside ordinary root Codex `agents/openai.yaml` files. Let the workspace default model handle that choice; this repo assumes the workspace default is `gpt-5.4`.
-- Keep root Codex skill `reasoning_effort` aligned to the main agent baseline instead of using per-skill reasoning tiers.
-- Home agent TOMLs should inherit model and reasoning from the main config; this repo does not pin per-skill model overrides.
+- Keep root Codex skill `reasoning_effort` at the repo-managed specialist baseline (`medium`) instead of mirroring the main-agent slow lane.
+- Home agent TOMLs should inherit model by default. Use explicit local overrides under `~/.codex/.codex-skill-manager/local-home-agent-overrides.json` only for bounded helper lanes that benefit from a faster or different model.
 - Built-in spawned runtime roles such as `explorer`, `reviewer`, `worker`, and `architect` cannot be model-pinned from repo policy alone unless the runtime exposes model selection directly.
 - When any Codex skill executes tools in this runtime, route the tool work through `js_repl` with `codex.tool(...)` rather than calling tools directly.
 
 ## Summary
 
 Keep execution simple and focused. Use multi-agent and specialist skills when they add clear value. Prioritize code quality, security, and maintainability. Let Codex CLI's native orchestration handle complexity naturally.
+
+## Git Identity Policy
+
+- When creating a Git commit, use the repository or global Git `user.name` and `user.email` as the commit author identity.
+- Do not replace the configured Git author with an assistant or tool-branded author name.
+- Treat any runtime-managed commit trailer as separate from Git author identity; the author fields should still stay on the user's configured Git identity.
