@@ -2550,7 +2550,7 @@ validate_codex_skill_dir() {
                 print_error "Reviewer skill is missing enforced structure or layered-testing guidance"
                 return 1
             fi
-            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "7. Language-Specific Quality Gates \\(CRITICAL\\)" "black --check" "ruff check" "mypy" "Import Linter" "circular import" "import safety" "prettier --check" "pass" "blocked"; then
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "7. Language-Specific Quality Gates (CRITICAL)" "black --check" "ruff check" "mypy" "Import Linter" "circular import" "import safety" "prettier --check" "pass" "blocked"; then
                 print_error "Reviewer skill is missing language-specific formatter, typing, import-safety, or reporting gates"
                 return 1
             fi
@@ -2558,7 +2558,7 @@ validate_codex_skill_dir() {
                 print_error "Reviewer skill is missing anti-junk entrypoint guidance"
                 return 1
             fi
-            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Multi-Agent Execution Pattern \(Completion-First\)" "main agent must verify" "send updated work back" "multiple parallel reviewer passes" "distinct purpose or workstream label"; then
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "Multi-Agent Execution Pattern (Completion-First)" "main agent must verify" "send updated work back" "multiple parallel reviewer passes" "distinct purpose or workstream label"; then
                 print_error "Reviewer skill is missing multi-reviewer lane or re-review guidance"
                 return 1
             fi
@@ -2738,7 +2738,7 @@ validate_codex_skill_dir() {
                 print_error "Git skill keeps high-risk commands inside Essential Git Commands"
                 return 1
             fi
-            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "High-Risk Operations \(Explicit User Approval Only\)" "explicit user approval" "git reset --hard" "git rebase -i"; then
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "High-Risk Operations (Explicit User Approval Only)" "explicit user approval" "git reset --hard" "git rebase -i"; then
                 print_error "Git skill is missing explicit high-risk operation gating"
                 return 1
             fi

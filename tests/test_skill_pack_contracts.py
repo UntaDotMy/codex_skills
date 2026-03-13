@@ -2830,6 +2830,26 @@ Notes:
                 completed_process.stdout + completed_process.stderr,
             )
 
+    def test_repo_validation_accepts_literal_parenthesized_skill_headings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+
+            for skill_name in ("git-expert", "reviewer"):
+                command = (
+                    f'source "{sourced_script_path}"; '
+                    f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                    f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                    'mkdir -p "$CODEX_TARGET"; '
+                    f'validate_codex_skill_dir "$CODEX_SOURCE/{skill_name}"'
+                )
+                completed_process = run_bash(command)
+                self.assertEqual(
+                    0,
+                    completed_process.returncode,
+                    completed_process.stdout + completed_process.stderr,
+                )
+
     def test_local_home_agent_override_file_can_pin_fast_model_for_memory_writer(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
