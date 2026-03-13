@@ -581,6 +581,7 @@ That usually means the current memory window is quiet or the rollout summaries d
 ## Related Docs
 
 - `docs/context-efficiency-playbook.md`
+- `docs/native-cli-migration-plan.md`
 - `AGENTS.md`
 - `00-skill-routing-and-escalation.md`
 - `VALIDATION_REPORT.md`

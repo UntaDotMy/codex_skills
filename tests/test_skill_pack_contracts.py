@@ -795,6 +795,33 @@ class SkillPackContractTests(unittest.TestCase):
             self.assertEqual([], list(temporary_bootstrap_directory.iterdir()))
             self.assertFalse((home_directory / ".codex-skill-pack-repos").exists())
 
+    def test_standalone_bootstrap_clone_failure_cleans_up_temporary_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            external_script_path = temporary_path / "sync-skills.sh"
+            temporary_bootstrap_directory = temporary_path / "tmp-bootstrap"
+            temporary_bootstrap_directory.mkdir()
+            home_directory = temporary_path / "home"
+            home_directory.mkdir()
+            missing_repository_path = temporary_path / "missing-bootstrap-source.git"
+            external_script_path.write_text(read_text(SYNC_SCRIPT_PATH), encoding="utf-8")
+
+            completed_process = run_bash(
+                f'bash "{external_script_path}" status',
+                environment={
+                    "CODEX_SKILLS_REPOSITORY_URL": str(missing_repository_path),
+                    "CODEX_SKILLS_REPOSITORY_BRANCH": current_repository_branch(),
+                    "CODEX_TARGET_OVERRIDE": str(temporary_path / ".codex"),
+                    "HOME": str(home_directory),
+                    "TMPDIR": str(temporary_bootstrap_directory),
+                },
+                working_directory=temporary_path,
+            )
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertNotEqual(0, completed_process.returncode, normalized_output)
+            self.assertIn("Cloning fresh temporary codex_skills repo for this run", normalized_output)
+            self.assertEqual([], list(temporary_bootstrap_directory.iterdir()))
+
     def test_standalone_bootstrap_ignores_inherited_foreign_runtime_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
@@ -935,6 +962,52 @@ class SkillPackContractTests(unittest.TestCase):
             )
             self.assertEqual([], list(staged_bootstrap_directory.iterdir()))
             self.assertFalse((home_directory / ".codex-skill-pack-repos").exists())
+
+    def test_powershell_standalone_bootstrap_clone_failure_cleans_up_temporary_directory(self) -> None:
+        powershell_path = shutil.which("pwsh") or shutil.which("powershell")
+        if powershell_path is None:
+            self.skipTest("PowerShell runtime is not available in this environment.")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            external_script_path = temporary_path / "sync-skills.ps1"
+            staged_bootstrap_directory = temporary_path / "tmp-bootstrap"
+            staged_bootstrap_directory.mkdir()
+            home_directory = temporary_path / "home"
+            home_directory.mkdir()
+            missing_repository_path = temporary_path / "missing-bootstrap-source.git"
+            managed_powershell_script_path = REPOSITORY_ROOT / "sync-skills.ps1"
+            external_script_path.write_text(read_text(managed_powershell_script_path), encoding="utf-8")
+
+            completed_process = subprocess.run(
+                [
+                    powershell_path,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(external_script_path),
+                    "status",
+                ],
+                cwd=temporary_path,
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "CODEX_SKILLS_REPOSITORY_URL": str(missing_repository_path),
+                    "CODEX_SKILLS_REPOSITORY_BRANCH": current_repository_branch(),
+                    "CODEX_TARGET_OVERRIDE": str(temporary_path / ".codex"),
+                    "HOME": str(home_directory),
+                    "TMPDIR": str(staged_bootstrap_directory),
+                    "TMP": str(staged_bootstrap_directory),
+                    "TEMP": str(staged_bootstrap_directory),
+                },
+            )
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertNotEqual(0, completed_process.returncode, normalized_output)
+            self.assertIn("Cloning fresh temporary codex_skills repo for this run", normalized_output)
+            self.assertEqual([], list(staged_bootstrap_directory.iterdir()))
 
     def test_powershell_bootstrap_ignores_inherited_foreign_runtime_repository(self) -> None:
         powershell_path = shutil.which("pwsh") or shutil.which("powershell")
@@ -2375,7 +2448,7 @@ Notes:
             sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
             command = (
                 f'source "{sourced_script_path}"; '
-                'validate_all() { return 0; }; '
+                'validate_sync_operation_prerequisites() { return 0; }; '
                 'pack_is_installed() { return 0; }; '
                 'run_task_line() { printf "%s\\n" "$1"; return 0; }; '
                 'apply_repo_managed_changes() { return 0; }; '
@@ -2394,7 +2467,7 @@ Notes:
             command = (
                 f'source "{sourced_script_path}"; '
                 'run_task_line() { printf "%s\\n" "$1"; return 0; }; '
-                'validate_all() { return 0; }; '
+                'validate_sync_operation_prerequisites() { return 0; }; '
                 'apply_repo_managed_changes() { return 0; }; '
                 f'main "{SYNC_SCRIPT_PATH.name.replace("sync-skills.sh", "__resume-after-self-update")}"'
             )
@@ -2437,6 +2510,210 @@ Notes:
             self.assertIn("[run] contract tests", normalized_output)
             self.assertIn("[FAIL] contract tests", normalized_output)
             self.assertIn("contract-tests-ran", normalized_output)
+
+    def test_fast_install_validation_skips_contract_tests_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                'validate_codex_repo_docs() { printf "docs-ran\n" >&2; return 0; }; '
+                'collect_failed_skill_names_parallel() { return 0; }; '
+                'run_repo_contract_tests() { printf "contract-tests-ran\n" >&2; return 1; }; '
+                'validate_sync_operation_prerequisites'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("[run] validate docs", normalized_output)
+            self.assertNotIn("contract-tests-ran", normalized_output)
+            self.assertIn("Fast install/update validation passed", normalized_output)
+
+    def test_fast_install_validation_can_delegate_to_full_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                'CODEX_SYNC_VALIDATION_MODE=full; '
+                'validate_all() { printf "full-validation-ran\n" >&2; return 0; }; '
+                'validate_sync_operation_prerequisites'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("full-validation-ran", normalized_output)
+
+    def test_sync_skill_to_codex_skips_redundant_validation_after_prerequisite_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET" "$(skill_manager_state_directory)"; '
+                'seed_default_local_home_agent_overrides >/dev/null; '
+                'validate_codex_skill_dir() { printf "unexpected-validation\n" >&2; return 9; }; '
+                'CODEX_SYNC_PREREQUISITES_VALIDATED=true; '
+                'sync_skill_to_codex "reviewer"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            self.assertNotIn("unexpected-validation", completed_process.stdout + completed_process.stderr)
+            self.assertTrue((temporary_path / ".codex" / "skills" / "reviewer" / "SKILL.md").exists())
+
+    def test_sync_skill_to_codex_validates_skill_when_prerequisite_flag_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET" "$(skill_manager_state_directory)"; '
+                'seed_default_local_home_agent_overrides >/dev/null; '
+                'validate_codex_skill_dir() { printf "validation-called\n" >&2; return 0; }; '
+                'sync_skill_to_codex "reviewer"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            self.assertIn("validation-called", completed_process.stdout + completed_process.stderr)
+
+    def test_fast_post_sync_verification_skips_full_skill_checksum_sweep_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                'pack_is_installed() { return 0; }; '
+                'list_root_guidance_relative_paths() { printf "AGENTS.md\n"; }; '
+                'verify_root_file_sync_match() { printf "root-verified:%s\n" "$1" >&2; return 0; }; '
+                'verify_synced_skill_and_home_agent_presence() { printf "presence-verified\n" >&2; return 0; }; '
+                'list_repo_agent_profile_names() { printf "reviewer\n"; }; '
+                'verify_agent_profile_sync_match() { printf "agent-profile-verified:%s\n" "$1" >&2; return 0; }; '
+                'list_removed_repo_managed_skill_names() { return 0; }; '
+                'list_removed_repo_managed_agent_profile_names() { return 0; }; '
+                'verify_managed_inventory_files_match_repo() { printf "inventories-verified\n" >&2; return 0; }; '
+                'verify_memory_status_reporter_home_wiring_present() { printf "wiring-verified\n" >&2; return 0; }; '
+                'verify_repo_managed_installation_hygiene() { printf "hygiene-verified\n" >&2; return 0; }; '
+                'collect_failed_checksum_skill_names_parallel() { printf "unexpected-full-skill-checksum\n" >&2; return 99; }; '
+                'run_task_line() { shift; "$@"; return $?; }; '
+                'verify_sync_operation_result'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("root-verified:AGENTS.md", normalized_output)
+            self.assertIn("agent-profile-verified:reviewer", normalized_output)
+            self.assertIn("Fast install/update verification passed", normalized_output)
+            self.assertNotIn("unexpected-full-skill-checksum", normalized_output)
+
+    def test_full_post_sync_verification_mode_can_delegate_to_full_checksum_sweep(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                'CODEX_SYNC_POST_SYNC_VERIFICATION_MODE=full; '
+                'verify_pack_checksums() { printf "full-post-sync-verification\n" >&2; return 0; }; '
+                'verify_sync_operation_result'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("full-post-sync-verification", normalized_output)
+
+    def test_root_guidance_drift_detection_uses_direct_file_compare_without_md5(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            source_root = temporary_path / "source"
+            target_root = temporary_path / "target"
+            source_root.mkdir()
+            target_root.mkdir()
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            relative_path = "docs/runtime-guardrails-and-memory-protocols.md"
+            (source_root / "docs").mkdir()
+            (target_root / "docs").mkdir()
+            payload = "same content\n"
+            (source_root / relative_path).write_text(payload, encoding="utf-8")
+            (target_root / relative_path).write_text(payload, encoding="utf-8")
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{source_root}"; '
+                f'CODEX_TARGET="{target_root}"; '
+                'list_root_guidance_relative_paths() { printf "docs/runtime-guardrails-and-memory-protocols.md\n"; }; '
+                'md5_for_file() { printf "unexpected-md5\n" >&2; return 9; }; '
+                'set +e; root_guidance_files_need_update; status="$?"; set -e; printf "status=%s\n" "$status"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            self.assertIn("status=1", completed_process.stdout)
+            self.assertNotIn("unexpected-md5", completed_process.stdout + completed_process.stderr)
+
+    def test_changed_agent_profile_detection_uses_direct_compare_without_md5(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agent-profiles" "$(skill_manager_state_directory)"; '
+                'seed_default_local_home_agent_overrides >/dev/null; '
+                'sync_skill_agent_profiles_to_codex >/dev/null; '
+                'md5_for_file() { printf "unexpected-md5\n" >&2; return 9; }; '
+                'collect_changed_agent_profile_names'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            self.assertEqual("", completed_process.stdout.strip())
+            self.assertNotIn("unexpected-md5", completed_process.stdout + completed_process.stderr)
+
+    def test_changed_skill_detection_uses_directory_compare_without_md5(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/skills"; '
+                'cp -R "$CODEX_SOURCE/reviewer" "$CODEX_TARGET/skills/reviewer"; '
+                'printf "\nchanged\n" >> "$CODEX_TARGET/skills/reviewer/SKILL.md"; '
+                'list_repo_skill_names() { printf "reviewer\n"; }; '
+                'parallel_worker_limit() { printf "1\n"; }; '
+                'run_items_in_parallel() { local worker_function_name="$1"; shift; shift; local work_item; for work_item in "$@"; do "$worker_function_name" "$work_item"; done; }; '
+                'md5_for_file() { printf "unexpected-md5\n" >&2; return 9; }; '
+                'collect_changed_skills_parallel'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            self.assertEqual("reviewer", completed_process.stdout.strip())
+            self.assertNotIn("unexpected-md5", completed_process.stdout + completed_process.stderr)
+
+    def test_changed_skill_detection_ignores_runtime_noise_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/skills"; '
+                'cp -R "$CODEX_SOURCE/reviewer" "$CODEX_TARGET/skills/reviewer"; '
+                'mkdir -p "$CODEX_TARGET/skills/reviewer/tests" "$CODEX_TARGET/skills/reviewer/__pycache__" "$CODEX_TARGET/skills/reviewer/.pytest_cache"; '
+                'printf "ignored\n" > "$CODEX_TARGET/skills/reviewer/tests/runtime-noise.txt"; '
+                'printf "ignored\n" > "$CODEX_TARGET/skills/reviewer/__pycache__/reviewer.cpython-313.pyc"; '
+                'printf "ignored\n" > "$CODEX_TARGET/skills/reviewer/.pytest_cache/state"; '
+                'printf "ignored\n" > "$CODEX_TARGET/skills/reviewer/runtime-noise.pyc"; '
+                'list_repo_skill_names() { printf "reviewer\n"; }; '
+                'parallel_worker_limit() { printf "1\n"; }; '
+                'run_items_in_parallel() { local worker_function_name="$1"; shift; shift; local work_item; for work_item in "$@"; do "$worker_function_name" "$work_item"; done; }; '
+                'md5_for_file() { printf "unexpected-md5\n" >&2; return 9; }; '
+                'collect_changed_skills_parallel'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            self.assertEqual("", completed_process.stdout.strip())
+            self.assertNotIn("unexpected-md5", completed_process.stdout + completed_process.stderr)
 
     def test_parallel_contract_test_runner_discovers_core_targets(self) -> None:
         discovered_targets = discover_contract_test_targets()
@@ -2608,6 +2885,40 @@ Notes:
             )
             self.assertIn("12", completed_process.stdout)
 
+    def test_ensure_python_launcher_adds_python3_shim_when_windows_alias_is_unusable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            shim_directory = temporary_path / "python-shims"
+            real_python_path = Path(sys.executable).as_posix()
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'shim_directory="{shim_directory}"; '
+                'mkdir -p "$shim_directory"; '
+                'cat > "$shim_directory/python3" <<\'SH\'\n'
+                '#!/usr/bin/env bash\n'
+                'echo "Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases." >&2\n'
+                'exit 49\n'
+                'SH\n'
+                'cat > "$shim_directory/python" <<\'SH\'\n'
+                '#!/usr/bin/env bash\n'
+                f'exec "{real_python_path}" "$@"\n'
+                'SH\n'
+                'chmod +x "$shim_directory/python3" "$shim_directory/python"; '
+                'PATH="$shim_directory:$PATH"; '
+                'unset PYTHON_LAUNCHER; '
+                'ensure_python_launcher; '
+                'type python3; '
+                'python3 -c "import sys"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertIn("python3 is a function", completed_process.stdout)
+
     def test_apply_repo_managed_changes_repairs_missing_skill_agent_profiles_even_without_skill_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
@@ -2629,7 +2940,7 @@ Notes:
                 'collect_changed_skills_parallel() { return 0; }; '
                 'list_removed_repo_managed_skill_names() { return 0; }; '
                 'root_guidance_files_need_update() { return 1; }; '
-                'verify_pack_checksums() { return 0; }; '
+                'verify_sync_operation_result() { return 0; }; '
                'apply_repo_managed_changes; '
                'grep -q "^model = \\\"gpt-5.4\\\"$" "$CODEX_TARGET/agents/memory-status-reporter.toml"; '
                'grep -q "^model_reasoning_effort = \\\"low\\\"$" "$CODEX_TARGET/agents/memory-status-reporter.toml"; '
@@ -2677,6 +2988,23 @@ Notes:
                 "MD5 verified for skill agent profile: memory-status-reporter",
                 completed_process.stdout,
             )
+
+    def test_md5_for_file_normalizes_windows_md5sum_escape_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                'md5sum() { printf "\\\\ABCDEF1234567890ABCDEF1234567890  %s\\n" "$1"; }; '
+                'md5_for_file "C:\\Users\\Example\\agent-profiles\\reviewer.toml"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertEqual("abcdef1234567890abcdef1234567890", completed_process.stdout.strip())
 
     def test_skill_pack_status_is_up_to_date_after_syncing_skill_agent_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

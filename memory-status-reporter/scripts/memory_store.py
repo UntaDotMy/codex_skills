@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
@@ -60,6 +60,40 @@ def parse_timestamp(raw_value: str | None) -> datetime | None:
 
 def current_timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def infer_freshness_window(freshness: str | None) -> timedelta | None:
+    normalized_freshness = (freshness or "").strip().lower()
+    if not normalized_freshness:
+        return None
+
+    if "hour" in normalized_freshness:
+        return timedelta(hours=1)
+    if "daily" in normalized_freshness or "day" in normalized_freshness:
+        return timedelta(days=1)
+    if "weekly" in normalized_freshness or "week" in normalized_freshness:
+        return timedelta(days=7)
+    if "monthly" in normalized_freshness or "month" in normalized_freshness:
+        return timedelta(days=30)
+    if "quarter" in normalized_freshness:
+        return timedelta(days=90)
+    if "yearly" in normalized_freshness or "annual" in normalized_freshness or "year" in normalized_freshness:
+        return timedelta(days=365)
+
+    return None
+
+
+def is_entry_past_inferred_freshness_window(entry: dict, reference_time: datetime | None = None) -> bool:
+    freshness_window = infer_freshness_window(str(entry.get("freshness", "")))
+    if freshness_window is None:
+        return False
+
+    updated_at = parse_timestamp(str(entry.get("updated_at") or entry.get("recorded_at")))
+    if updated_at is None:
+        return False
+
+    comparison_time = reference_time or datetime.now(UTC)
+    return updated_at + freshness_window < comparison_time
 
 
 def normalize_workspace_root(workspace_root: Path | None) -> Path:
@@ -365,7 +399,8 @@ def lookup_research_cache_entries(
     scored_entries: list[tuple[int, datetime, dict]] = []
     for entry in load_research_cache_entries(scope):
         entry_status = str(entry.get("status", "fresh")).lower()
-        if not include_stale and entry_status in {"stale", "superseded"}:
+        entry_is_stale = entry_status in {"stale", "superseded"} or is_entry_past_inferred_freshness_window(entry)
+        if not include_stale and entry_is_stale:
             continue
 
         searchable_parts = [

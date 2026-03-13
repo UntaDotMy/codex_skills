@@ -1124,26 +1124,28 @@ write_managed_skill_inventory_from_repo() {
     list_repo_skill_names > "$inventory_file"
 }
 
-write_managed_home_agent_inventory_from_repo() {
-    local inventory_file
+emit_managed_home_agent_inventory_from_repo() {
     local skill_name
     local agent_config_path
     local home_agent_name
 
-    inventory_file="$(managed_home_agent_inventory_file)"
-    ensure_skill_manager_state_directories
-
-    : > "$inventory_file"
     while IFS= read -r skill_name; do
         [[ -n "$skill_name" ]] || continue
         while IFS= read -r agent_config_path; do
             [[ -n "$agent_config_path" ]] || continue
             home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
-            printf '%s|%s\n' "$skill_name" "$home_agent_name" >> "$inventory_file"
+            printf '%s|%s\n' "$skill_name" "$home_agent_name"
         done < <(list_skill_agent_config_files "$skill_name")
-    done < <(list_repo_skill_names)
+    done < <(list_repo_skill_names) | LC_ALL=C sort -u
+}
 
-    sort -u -o "$inventory_file" "$inventory_file"
+write_managed_home_agent_inventory_from_repo() {
+    local inventory_file
+
+    inventory_file="$(managed_home_agent_inventory_file)"
+    ensure_skill_manager_state_directories
+
+    emit_managed_home_agent_inventory_from_repo > "$inventory_file"
 }
 
 write_managed_agent_profile_inventory_from_repo() {
@@ -1293,8 +1295,28 @@ detect_python_launcher() {
     return 1
 }
 
+ensure_python_shell_aliases() {
+    case "$PYTHON_LAUNCHER" in
+        "py -3")
+            if ! python3 -c "import sys" >/dev/null 2>&1; then
+                python3() {
+                    py -3 "$@"
+                }
+            fi
+            ;;
+        "python")
+            if ! python3 -c "import sys" >/dev/null 2>&1; then
+                python3() {
+                    python "$@"
+                }
+            fi
+            ;;
+    esac
+}
+
 ensure_python_launcher() {
     if [[ -n "${PYTHON_LAUNCHER:-}" ]]; then
+        ensure_python_shell_aliases
         return 0
     fi
 
@@ -1303,6 +1325,7 @@ ensure_python_launcher() {
         return 1
     }
 
+    ensure_python_shell_aliases
     return 0
 }
 
@@ -1343,7 +1366,7 @@ md5_for_file() {
     local file_path=$1
 
     if command -v md5sum >/dev/null 2>&1; then
-        md5sum "$file_path" | awk '{print tolower($1)}'
+        md5sum "$file_path" | awk '{sub(/^\\/, "", $1); print tolower($1)}'
         return 0
     fi
 
@@ -1368,6 +1391,38 @@ md5_for_file() {
 
     print_error "No MD5 checksum tool is available on this system"
     return 1
+}
+
+files_have_same_content() {
+    local source_path=$1
+    local target_path=$2
+
+    [[ -f "$source_path" ]] || return 1
+    [[ -f "$target_path" ]] || return 1
+
+    if command -v cmp >/dev/null 2>&1; then
+        cmp -s "$source_path" "$target_path"
+        return $?
+    fi
+
+    diff -q "$source_path" "$target_path" >/dev/null 2>&1
+}
+
+skill_directories_match_without_md5() {
+    local source_directory=$1
+    local target_directory=$2
+
+    [[ -d "$source_directory" ]] || return 1
+    [[ -d "$target_directory" ]] || return 1
+
+    diff -qr \
+        --exclude='tests' \
+        --exclude='__pycache__' \
+        --exclude='.pytest_cache' \
+        --exclude='*.pyc' \
+        --exclude='*.pyo' \
+        --exclude='.DS_Store' \
+        "$source_directory" "$target_directory" >/dev/null 2>&1
 }
 
 build_directory_manifest() {
@@ -1716,6 +1771,244 @@ verify_pack_checksums() {
 
     print_error "One or more MD5 verification checks failed"
     return 1
+}
+
+verify_root_file_sync_match() {
+    local relative_path=$1
+    local source_path="$CODEX_SOURCE/$relative_path"
+    local target_path="$CODEX_TARGET/$relative_path"
+
+    if [[ ! -f "$source_path" ]]; then
+        print_error "Source file missing for sync verification: $source_path"
+        return 1
+    fi
+
+    if [[ ! -f "$target_path" ]]; then
+        print_error "Target file missing for sync verification: $target_path"
+        return 1
+    fi
+
+    if ! files_have_same_content "$source_path" "$target_path"; then
+        print_error "Content mismatch for synced root file: $relative_path"
+        return 1
+    fi
+
+    print_success "Content verified for $relative_path"
+    return 0
+}
+
+verify_agent_profile_sync_match() {
+    local agent_profile_name=$1
+    local target_path="$CODEX_TARGET/agent-profiles/$agent_profile_name.toml"
+    local expected_profile_path
+    local agent_config_path
+
+    agent_config_path="$(find_agent_config_path_for_home_agent_name "$agent_profile_name")" || {
+        print_error "Unable to resolve source agent config for sync verification: $agent_profile_name"
+        return 1
+    }
+
+    if [[ ! -f "$target_path" ]]; then
+        print_error "Agent profile is not installed in Codex home: $agent_profile_name"
+        return 1
+    fi
+
+    expected_profile_path="$(mktemp)"
+    write_codex_agent_toml "$agent_config_path" "$expected_profile_path" "$agent_profile_name" "agent-profile" >/dev/null || {
+        rm -f "$expected_profile_path"
+        print_error "Unable to generate expected skill agent profile: $agent_profile_name"
+        return 1
+    }
+
+    if ! files_have_same_content "$expected_profile_path" "$target_path"; then
+        rm -f "$expected_profile_path"
+        print_error "Content verification failed for skill agent profile: $agent_profile_name"
+        return 1
+    fi
+
+    rm -f "$expected_profile_path"
+    print_success "Content verified for skill agent profile: $agent_profile_name"
+    return 0
+}
+
+verify_inventory_file_matches_command() {
+    local inventory_label=$1
+    local inventory_file=$2
+    shift 2
+    local expected_inventory_file
+
+    if [[ ! -f "$inventory_file" ]]; then
+        print_error "Missing managed inventory file: $inventory_label ($inventory_file)"
+        return 1
+    fi
+
+    expected_inventory_file="$(mktemp)"
+    "$@" > "$expected_inventory_file" || {
+        rm -f "$expected_inventory_file"
+        print_error "Unable to build expected managed inventory for: $inventory_label"
+        return 1
+    }
+
+    if ! diff -u "$expected_inventory_file" "$inventory_file" >/dev/null; then
+        rm -f "$expected_inventory_file"
+        print_error "Managed inventory drift detected for: $inventory_label"
+        return 1
+    fi
+
+    rm -f "$expected_inventory_file"
+    print_success "Managed inventory verified for: $inventory_label"
+    return 0
+}
+
+verify_managed_inventory_files_match_repo() {
+    local failed=0
+
+    verify_inventory_file_matches_command \
+        "skills" \
+        "$(managed_skill_inventory_file)" \
+        list_repo_skill_names || failed=1
+    verify_inventory_file_matches_command \
+        "home agents" \
+        "$(managed_home_agent_inventory_file)" \
+        emit_managed_home_agent_inventory_from_repo || failed=1
+    verify_inventory_file_matches_command \
+        "agent profiles" \
+        "$(managed_agent_profile_inventory_file)" \
+        list_repo_agent_profile_names || failed=1
+
+    if [[ $failed -eq 0 ]]; then
+        print_success "All managed inventories match the repo"
+        return 0
+    fi
+
+    print_error "One or more managed inventories drifted from the repo"
+    return 1
+}
+
+verify_memory_status_reporter_home_wiring_present() {
+    local memory_status_home_agent_file="$CODEX_TARGET/agents/memory-status-reporter.toml"
+    local home_config_file="$CODEX_TARGET/config.toml"
+
+    if [[ ! -f "$memory_status_home_agent_file" ]]; then
+        print_error "memory-status-reporter home agent wiring is missing: $memory_status_home_agent_file"
+        return 1
+    fi
+
+    if ! config_has_required_memory_status_lines "$home_config_file"; then
+        print_error "Codex home config is missing required memory-status-reporter wiring: $home_config_file"
+        return 1
+    fi
+
+    print_success "memory-status-reporter home wiring verified"
+    return 0
+}
+
+verify_synced_skill_and_home_agent_presence() {
+    local skill_name
+    local skill_path
+    local home_agent_name
+    local agent_config_path
+    local failed=0
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        skill_path="$CODEX_TARGET/skills/$skill_name/SKILL.md"
+        if [[ ! -f "$skill_path" ]]; then
+            print_error "Managed skill is missing after sync: $skill_name"
+            failed=1
+        fi
+
+        while IFS= read -r agent_config_path; do
+            [[ -n "$agent_config_path" ]] || continue
+            home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+            if [[ ! -f "$CODEX_TARGET/agents/$home_agent_name.toml" ]]; then
+                print_error "Managed home agent is missing after sync: $home_agent_name"
+                failed=1
+            fi
+        done < <(list_skill_agent_config_files "$skill_name")
+    done < <(list_repo_skill_names)
+
+    if [[ $failed -eq 0 ]]; then
+        print_success "Managed skill and home-agent presence verified"
+        return 0
+    fi
+
+    print_error "One or more managed skills or home agents are missing after sync"
+    return 1
+}
+
+verify_sync_operation_health() {
+    local failed=0
+    local root_guidance_relative_path
+    local skill_name
+    local agent_profile_name
+
+    if ! pack_is_installed; then
+        print_error "Codex skill pack is not installed in Codex home: $CODEX_TARGET"
+        return 1
+    fi
+
+    while IFS= read -r root_guidance_relative_path; do
+        [[ -n "$root_guidance_relative_path" ]] || continue
+        run_task_line "verify $root_guidance_relative_path" verify_root_file_sync_match "$root_guidance_relative_path" || failed=1
+    done < <(list_root_guidance_relative_paths)
+
+    run_task_line "verify managed skills" verify_synced_skill_and_home_agent_presence || failed=1
+
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        if ! verify_agent_profile_sync_match "$agent_profile_name"; then
+            failed=1
+        fi
+    done < <(list_repo_agent_profile_names)
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        print_error "Managed installed skill no longer exists in the repo: $skill_name"
+        failed=1
+    done < <(list_removed_repo_managed_skill_names)
+
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        print_error "Managed installed agent profile no longer exists in the repo: $agent_profile_name"
+        failed=1
+    done < <(list_removed_repo_managed_agent_profile_names)
+
+    run_task_line "verify managed inventories" verify_managed_inventory_files_match_repo || failed=1
+    run_task_line "verify memory wiring" verify_memory_status_reporter_home_wiring_present || failed=1
+    run_task_line "verify runtime hygiene" verify_repo_managed_installation_hygiene || failed=1
+
+    if [[ $failed -eq 0 ]]; then
+        print_success "Fast install/update verification passed"
+        return 0
+    fi
+
+    print_error "Fast install/update verification failed"
+    return 1
+}
+
+verify_sync_operation_result() {
+    local verification_mode="${CODEX_SYNC_POST_SYNC_VERIFICATION_MODE:-fast}"
+
+    case "$verification_mode" in
+        full)
+            verify_pack_checksums
+            return $?
+            ;;
+        none)
+            print_warning "Skipping post-sync verification because CODEX_SYNC_POST_SYNC_VERIFICATION_MODE=none"
+            return 0
+            ;;
+        fast)
+            verify_sync_operation_health
+            return $?
+            ;;
+        *)
+            print_error "Unsupported CODEX_SYNC_POST_SYNC_VERIFICATION_MODE value: $verification_mode"
+            print_info "Expected fast, full, or none."
+            return 1
+            ;;
+    esac
 }
 
 # Function to validate skill file
@@ -3038,9 +3331,11 @@ sync_skill_to_codex() {
 
     print_info "Syncing $skill_name..."
 
-    if ! validate_codex_skill_dir "$source_skill_directory"; then
-        print_error "Validation failed for $skill_name, aborting Codex sync to prevent stale home state"
-        return 1
+    if [[ "${CODEX_SYNC_PREREQUISITES_VALIDATED:-false}" != "true" ]]; then
+        if ! validate_codex_skill_dir "$source_skill_directory"; then
+            print_error "Validation failed for $skill_name, aborting Codex sync to prevent stale home state"
+            return 1
+        fi
     fi
 
     if [[ -d "$CODEX_TARGET/$skill_name" ]]; then
@@ -3114,8 +3409,8 @@ sync_codex() {
     run_task_line "track managed agents" write_managed_home_agent_inventory_from_repo || return 1
     run_task_line "track managed agent profiles" write_managed_agent_profile_inventory_from_repo || return 1
 
-    if ! verify_pack_checksums; then
-        print_error "MD5 verification failed after sync; Codex home may be partial"
+    if ! verify_sync_operation_result; then
+        print_error "Post-sync verification failed after sync; Codex home may be partial"
         return 1
     fi
 
@@ -3189,8 +3484,8 @@ sync_codex_delta_update() {
     write_managed_home_agent_inventory_from_repo
     write_managed_agent_profile_inventory_from_repo
 
-    if ! verify_pack_checksums; then
-        print_error "MD5 verification failed after update; Codex home may be partial"
+    if ! verify_sync_operation_result; then
+        print_error "Post-sync verification failed after update; Codex home may be partial"
         return 1
     fi
 
@@ -3225,31 +3520,60 @@ validate_all() {
     return 1
 }
 
+validate_sync_operation_prerequisites() {
+    local validation_mode="${CODEX_SYNC_VALIDATION_MODE:-fast}"
+    local failed=0
+    local failed_skill_name
+
+    case "$validation_mode" in
+        full)
+            validate_all
+            return $?
+            ;;
+        none)
+            print_warning "Skipping install/update validation because CODEX_SYNC_VALIDATION_MODE=none"
+            return 0
+            ;;
+        fast)
+            run_task_line "validate docs" validate_codex_repo_docs || ((failed+=1))
+
+            while IFS= read -r failed_skill_name; do
+                [[ -n "$failed_skill_name" ]] || continue
+                print_error "Validation failed for skill: $failed_skill_name"
+                ((failed+=1))
+            done < <(collect_failed_skill_names_parallel)
+
+            if [[ $failed -eq 0 ]]; then
+                print_success "Fast install/update validation passed"
+                return 0
+            fi
+
+            print_error "$failed skill(s) failed fast install/update validation"
+            return 1
+            ;;
+        *)
+            print_error "Unsupported CODEX_SYNC_VALIDATION_MODE value: $validation_mode"
+            print_info "Expected fast, full, or none."
+            return 1
+            ;;
+    esac
+}
+
 PARALLEL_MANIFEST_STATUS_DIRECTORY=""
 
 run_manifest_check_worker() {
     local skill_name=$1
     local source_directory="$CODEX_SOURCE/$skill_name"
     local target_directory="$CODEX_TARGET/skills/$skill_name"
-    local source_manifest
-    local target_manifest
 
     if [[ ! -d "$target_directory" ]]; then
         printf '%s\n' "$skill_name" > "$PARALLEL_MANIFEST_STATUS_DIRECTORY/$skill_name.changed"
         return 0
     fi
 
-    source_manifest="$(mktemp)"
-    target_manifest="$(mktemp)"
-
-    build_skill_manifest "$source_directory" > "$source_manifest"
-    build_skill_manifest "$target_directory" > "$target_manifest"
-
-    if ! diff -u "$source_manifest" "$target_manifest" >/dev/null; then
+    if ! skill_directories_match_without_md5 "$source_directory" "$target_directory"; then
         printf '%s\n' "$skill_name" > "$PARALLEL_MANIFEST_STATUS_DIRECTORY/$skill_name.changed"
     fi
-
-    rm -f "$source_manifest" "$target_manifest"
 }
 
 collect_changed_skills_parallel() {
@@ -3288,7 +3612,7 @@ collect_changed_agent_profile_names() {
 
     while IFS= read -r agent_profile_name; do
         [[ -n "$agent_profile_name" ]] || continue
-        if ! verify_agent_profile_checksum "$agent_profile_name" >/dev/null 2>&1; then
+        if ! verify_agent_profile_sync_match "$agent_profile_name" >/dev/null 2>&1; then
             printf "%s\n" "$agent_profile_name"
         fi
     done < <(list_repo_agent_profile_names)
@@ -3360,7 +3684,7 @@ root_guidance_files_need_update() {
             return 0
         fi
 
-        if [[ "$(md5_for_file "$source_path")" != "$(md5_for_file "$target_path")" ]]; then
+        if ! files_have_same_content "$source_path" "$target_path"; then
             return 0
         fi
     done < <(list_root_guidance_relative_paths)
@@ -3619,7 +3943,7 @@ apply_repo_managed_changes() {
 
     if [[ "$root_files_changed" == "false" ]] && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]] && [[ ${#changed_agent_profiles[@]} -eq 0 ]] && [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
         print_success "Installed skill pack is already up to date"
-        verify_pack_checksums || return 1
+        verify_sync_operation_result || return 1
         write_install_metadata || return 1
         refresh_bootstrap_entry_script_from_repo
         return 0
@@ -3631,15 +3955,15 @@ apply_repo_managed_changes() {
 }
 
 install_codex() {
-    run_task_line "validate" validate_all || return 1
+    run_task_line "validate" validate_sync_operation_prerequisites || return 1
 
     if pack_is_installed; then
         print_info "Skill pack already exists in $CODEX_TARGET; install will refresh only the changed repo-managed files, including AGENTS.md and root routing when needed."
-        run_task_line "sync changes to $CODEX_TARGET" apply_repo_managed_changes
+        CODEX_SYNC_PREREQUISITES_VALIDATED=true run_task_line "sync changes to $CODEX_TARGET" apply_repo_managed_changes
         return $?
     fi
 
-    run_task_line "install to $CODEX_TARGET" sync_codex
+    CODEX_SYNC_PREREQUISITES_VALIDATED=true run_task_line "install to $CODEX_TARGET" sync_codex
 }
 
 refresh_repo_before_update_if_possible() {
@@ -3720,8 +4044,8 @@ refresh_repo_before_update_if_possible() {
 
 update_codex() {
     refresh_repo_before_update_if_possible || return 1
-    run_task_line "validate" validate_all || return 1
-    run_task_line "apply repo updates" apply_repo_managed_changes
+    run_task_line "validate" validate_sync_operation_prerequisites || return 1
+    CODEX_SYNC_PREREQUISITES_VALIDATED=true run_task_line "apply repo updates" apply_repo_managed_changes
 }
 
 update_codex_from_github() {
@@ -4071,6 +4395,8 @@ show_usage() {
     echo "  CODEX_SKILLS_REPOSITORY_PATH=/path/to/codex_skills  Use an explicit repo path instead of a fresh temporary bootstrap clone"
     echo "  CODEX_SKILLS_REPOSITORY_URL=https://github.com/owner/repo.git  Override the bootstrap clone source"
     echo "  CODEX_SKILLS_REPOSITORY_BRANCH=main  Override the bootstrap clone branch"
+    echo "  CODEX_SYNC_VALIDATION_MODE=fast|full|none  Choose install/update validation depth (default: fast)"
+    echo "  CODEX_SYNC_POST_SYNC_VERIFICATION_MODE=fast|full|none  Choose install/update post-sync verification depth (default: fast)"
 }
 
 main() {

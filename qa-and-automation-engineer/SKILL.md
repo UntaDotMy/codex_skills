@@ -63,6 +63,8 @@ Start with the smallest reference set that answers the task:
 
 ## Delivery Workflow
 
+Before execution, translate the request into a working brief, preserve one top-level plan item per explicit user task, and keep that brief visible while you choose test layers, release gates, and recovery checks.
+
 ### 1. Scope the Risk Surface
 - Read the requirement, user story, incident summary, or change request at least twice.
 - Identify the business-critical path, data sensitivity, external dependencies, and rollback risk.
@@ -95,6 +97,7 @@ Tie each chosen layer to a concrete risk, not to habit.
 - Expand to adjacent regression coverage only after the focused signal is clear.
 - Prefer realistic timing, data, and dependency boundaries over over-mocking.
 - Use traces, network capture, and logs to explain why a test failed, not just that it failed.
+- Keep proving check per patch batch so every change lands with a narrow, rerunnable validation step before the next batch starts.
 
 ### 5. Triage Failures
 Classify each failure:
