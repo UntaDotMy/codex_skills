@@ -289,7 +289,7 @@ The sync does all of the following:
 
 - copies root skills into `~/.codex/skills/`
 - copies `AGENTS.md` and `00-skill-routing-and-escalation.md` into `~/.codex/`
-- refreshes `~/.codex/agents/*.toml` from each root `agents/openai.yaml`
+- generates `~/.codex/agents/*.toml` from each skill's `agents/openai.yaml`
 - mirrors those 12 skill-owned agents into `~/.codex/agent-profiles/*.toml` so `reviewer`, `memory-status-reporter`, and the other specialist lanes are available as full agent profiles with the same skill instructions attached
 - keeps repo-managed specialist skills on the repo baseline of `gpt-5.4` with `reasoning_effort: "medium"` in generated home-agent and agent-profile TOMLs instead of mirroring the main-agent slow lane
 - keeps `~/.codex/config.toml` wired for `memory-status-reporter`
@@ -301,6 +301,8 @@ The sync does all of the following:
 - prunes runtime-noise artifacts from managed installs in `~/.codex`, including `tests/`, `.pytest_cache/`, `__pycache__/`, `*.pyc`, and `*.pyo`
 - applies delta updates by refreshing changed repo-managed skills, updating changed root guidance files, and pruning repo-managed skills that disappeared from the source tree
 - injects shared execution-policy lines for working briefs, context efficiency, modular structure, surgical patches, compact learning snapshots, and freshness-aware research reuse
+
+The source repo does not ship root-level agents/ or agent-profiles/ directories. Those generated home surfaces are created in ~/.codex during install or update.
 
 ### Pair UI Output With UX Evidence
 
@@ -544,6 +546,8 @@ Run:
 ./sync-skills.sh codex
 ./sync-skills.sh status
 ```
+
+If Codex home is in a partial state and `~/.codex/config.toml` points at missing `agents/*.toml` files, rerun `./sync-skills.sh install`. The installer now treats config-only managed remnants as incomplete and repairs them with a full sync instead of assuming the pack is already healthy.
 
 Then verify `~/.codex/config.toml` contains the `memory-status-reporter` route line, the `memory-status-reporter` agent block, and the injected execution-policy lines for working briefs, context retrieval, surgical patching, modular structure, and learning snapshots.
 

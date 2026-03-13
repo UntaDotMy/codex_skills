@@ -951,13 +951,25 @@ PY
 pack_has_repo_managed_files() {
     local installed_skill_name
     local installed_agent_profile_name
+    local home_config_file="$CODEX_TARGET/config.toml"
 
     if [[ -f "$CODEX_TARGET/AGENTS.md" ]] || [[ -f "$CODEX_TARGET/00-skill-routing-and-escalation.md" ]]; then
         return 0
     fi
 
-    if [[ -f "$CODEX_TARGET/agents/memory-status-reporter.toml" ]] || config_has_any_memory_status_lines "$CODEX_TARGET/config.toml" || config_has_any_managed_routing_lines "$CODEX_TARGET/config.toml" || config_has_any_repo_managed_agent_sections "$CODEX_TARGET/config.toml"; then
+    if [[ -f "$CODEX_TARGET/agents/memory-status-reporter.toml" ]]; then
         return 0
+    fi
+
+    if config_has_any_repo_managed_agent_sections "$home_config_file"; then
+        if config_has_missing_repo_managed_agent_file_references "$home_config_file"; then
+            return 1
+        fi
+        return 0
+    fi
+
+    if config_has_any_memory_status_lines "$home_config_file" || config_has_any_managed_routing_lines "$home_config_file"; then
+        return 1
     fi
 
     while IFS= read -r installed_agent_profile_name; do
@@ -1399,6 +1411,63 @@ config_has_any_repo_managed_agent_sections() {
     done < <(list_repo_agent_profile_names)
 
     return 1
+}
+
+config_has_missing_repo_managed_agent_file_references() {
+    local config_file=$1
+    local managed_agent_names_file
+    local python_exit_code
+
+    [[ -f "$config_file" ]] || return 1
+
+    managed_agent_names_file="$(mktemp)" || return 1
+    if ! list_repo_agent_profile_names > "$managed_agent_names_file"; then
+        rm -f "$managed_agent_names_file"
+        return 1
+    fi
+
+    run_python - "$config_file" "$CODEX_TARGET" "$managed_agent_names_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+config_file = Path(sys.argv[1])
+codex_target = Path(sys.argv[2])
+managed_agent_names = {
+    line.strip()
+    for line in Path(sys.argv[3]).read_text(encoding="utf-8").splitlines()
+    if line.strip()
+}
+legacy_aliases = {"default", "explorer", "worker", "architect", "awaiter"}
+config_text = config_file.read_text(encoding="utf-8")
+section_pattern = re.compile(r"(?ms)^\[agents\.([^\]]+)\]\n(.*?)(?=^\[|\Z)")
+config_file_pattern = re.compile(r'^config_file = "(.*?)"$', flags=re.MULTILINE)
+
+for section_name, section_body in section_pattern.findall(config_text):
+    config_file_match = config_file_pattern.search(section_body)
+    if config_file_match is None:
+        continue
+    relative_config_path = config_file_match.group(1).strip()
+    if not relative_config_path.startswith("agents/"):
+        continue
+
+    referenced_agent_name = Path(relative_config_path).stem
+    if (
+        section_name not in managed_agent_names
+        and referenced_agent_name not in managed_agent_names
+        and section_name not in legacy_aliases
+        and referenced_agent_name not in legacy_aliases
+    ):
+        continue
+
+    if not (codex_target / relative_config_path).exists():
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+    python_exit_code=$?
+    rm -f "$managed_agent_names_file"
+    return $python_exit_code
 }
 
 ensure_python_shell_aliases() {
@@ -2481,6 +2550,10 @@ validate_codex_skill_dir() {
                 print_error "Reviewer skill is missing enforced structure or layered-testing guidance"
                 return 1
             fi
+            if ! markdown_section_contains_all_patterns "$skill_dir/SKILL.md" "7. Language-Specific Quality Gates \\(CRITICAL\\)" "black --check" "ruff check" "mypy" "Import Linter" "circular import" "import safety" "prettier --check" "pass" "blocked"; then
+                print_error "Reviewer skill is missing language-specific formatter, typing, import-safety, or reporting gates"
+                return 1
+            fi
             if ! grep -q "REJECT duplicate entry paths" "$skill_dir/SKILL.md" || ! grep -q "REQUIRE one obvious path" "$skill_dir/SKILL.md"; then
                 print_error "Reviewer skill is missing anti-junk entrypoint guidance"
                 return 1
@@ -2738,12 +2811,16 @@ validate_codex_agent_config() {
     fi
 
     if [[ "$home_agent_name" == "reviewer" ]]; then
-        if ! grep -q "findings first" "$config_file" || ! grep -q "Do not mutate code by default" "$config_file"; then
+        if ! grep -q "release checks" "$config_file" || ! grep -q "gap-finding" "$config_file" || ! grep -q "rollback or observability risk" "$config_file" || ! grep -q "partial implementation" "$config_file" || ! grep -q "findings first" "$config_file" || ! grep -q "Do not mutate code by default" "$config_file"; then
             print_error "Reviewer-family prompts must stay review-first and non-mutating by default: $home_agent_name"
             return 1
         fi
         if ! grep -q "named surface" "$config_file" || ! grep -q "validated patch batches" "$config_file" || ! grep -q "workaround-only" "$config_file"; then
             print_error "Reviewer-family prompts must keep named-scope, patch-batch, and root-cause discipline explicit: $home_agent_name"
+            return 1
+        fi
+        if ! grep -q "Black" "$config_file" || ! grep -q "Ruff" "$config_file" || ! grep -q "MyPy" "$config_file" || ! grep -q "circular import" "$config_file" || ! grep -q "import-safety" "$config_file" || ! grep -q "Prettier" "$config_file" || ! grep -q "passed, failed, skipped, or blocked" "$config_file"; then
+            print_error "Reviewer-family prompts must keep formatter, type, import-safety, and gate-status checks explicit: $home_agent_name"
             return 1
         fi
     fi
@@ -2980,12 +3057,12 @@ validate_codex_guidance_file() {
             print_error "Missing scoped-memory or research-cache helper workflow in README.md"
             return 1
         fi
-       if ! grep -qi "sync-skills.ps1" "$file" || ! grep -qi "delegates to `sync-skills.sh`" "$file" || ! grep -qi "Git Bash on Windows" "$file" || ! grep -qi "runtime-guardrails-and-memory-protocols.md" "$file" || ! grep -qi "do not stay solo by default" "$file" || ! grep -qi "top-level plan item per explicit user task" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "memory writer" "$file"; then
+       if ! grep -qi "sync-skills.ps1" "$file" || ! grep -Eqi "delegates to .*sync-skills\.sh" "$file" || ! grep -qi "Git Bash on Windows" "$file" || ! grep -qi "runtime-guardrails-and-memory-protocols.md" "$file" || ! grep -qi "do not stay solo by default" "$file" || ! grep -qi "top-level plan item per explicit user task" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "memory writer" "$file"; then
            print_error "Missing Windows wrapper, runtime-guardrails, local-override, or memory-writer documentation in README.md"
            return 1
        fi
-        if ! grep -qi "agent-profiles/\*\.toml" "$file" || ! grep -qi "skill agent profiles: 12/12" "$file"; then
-            print_error "Missing skill-agent-profile mirror documentation in README.md"
+        if ! grep -qi "agent-profiles/\*\.toml" "$file" || ! grep -qi "skill agent profiles: 12/12" "$file" || ! grep -Eqi "does not ship root-level .*agents/.*agent-profiles/ directories" "$file" || ! grep -Eqi "generated home surfaces are created in .*~/.codex.* during install or update" "$file"; then
+            print_error "Missing generated-home surface or skill-agent-profile mirror documentation in README.md"
             return 1
         fi
         if ! grep -qi "Pair UI Output With UX Evidence" "$file" || ! grep -qi "issue-driven worktree" "$file" || ! grep -qi "Hold the answer until closure is proven" "$file"; then
