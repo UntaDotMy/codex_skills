@@ -2623,6 +2623,31 @@ Notes:
             normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
             self.assertIn("full-post-sync-verification", normalized_output)
 
+    def test_apply_repo_managed_changes_repairs_config_wiring_drift_even_without_repo_file_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                'ensure_sync_runtime_prerequisites() { return 0; }; '
+                'seed_default_local_home_agent_overrides() { return 0; }; '
+                'pack_is_installed() { return 0; }; '
+                'collect_changed_skills_parallel() { return 0; }; '
+                'collect_changed_agent_profile_names() { return 0; }; '
+                'list_removed_repo_managed_skill_names() { return 0; }; '
+                'list_removed_repo_managed_agent_profile_names() { return 0; }; '
+                'root_guidance_files_need_update() { return 1; }; '
+                'managed_config_wiring_needs_update() { return 0; }; '
+                'sync_codex_delta_update() { printf "delta:%s|%s\n" "$1" "$2"; return 0; }; '
+                'refresh_bootstrap_entry_script_from_repo() { return 0; }; '
+                'apply_repo_managed_changes'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("config_refresh=true", normalized_output)
+            self.assertIn("delta:false|true", normalized_output)
+            self.assertNotIn("Installed skill pack is already up to date", normalized_output)
+
     def test_root_guidance_drift_detection_uses_direct_file_compare_without_md5(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)

@@ -3671,7 +3671,8 @@ sync_codex() {
 
 sync_codex_delta_update() {
     local root_files_changed=$1
-    shift
+    local config_wiring_refresh=$2
+    shift 2
     local changed_skills=("$@")
     local removed_skills=()
     local skill_name
@@ -3710,7 +3711,7 @@ sync_codex_delta_update() {
         return 1
     fi
 
-    if [[ "$root_files_changed" == "true" ]] || [[ " ${changed_skills[*]} " == *" memory-status-reporter "* ]]; then
+    if [[ "$root_files_changed" == "true" ]] || [[ "$config_wiring_refresh" == "true" ]] || [[ " ${changed_skills[*]} " == *" memory-status-reporter "* ]]; then
         if ! sync_memory_status_reporter_home_wiring; then
             print_error "Failed to sync memory-status-reporter live home wiring"
             return 1
@@ -3917,6 +3918,32 @@ core_files_need_update() {
     fi
 
     if agent_profiles_need_update; then
+        return 0
+    fi
+
+    if managed_config_wiring_needs_update; then
+        return 0
+    fi
+
+    return 1
+}
+
+managed_config_wiring_needs_update() {
+    local home_config_file="$CODEX_TARGET/config.toml"
+
+    if [[ ! -f "$home_config_file" ]]; then
+        return 0
+    fi
+
+    if ! config_has_required_managed_routing_lines "$home_config_file"; then
+        return 0
+    fi
+
+    if ! config_has_required_memory_status_lines "$home_config_file"; then
+        return 0
+    fi
+
+    if ! verify_home_agent_config_sections_match_repo >/dev/null 2>&1; then
         return 0
     fi
 
@@ -4199,6 +4226,7 @@ apply_repo_managed_changes() {
     local removed_agent_profiles=()
     local skill_name
     local root_files_changed="false"
+    local config_wiring_refresh="false"
 
     if ! ensure_sync_runtime_prerequisites; then
         print_error "Runtime prerequisites failed, aborting update"
@@ -4240,7 +4268,11 @@ apply_repo_managed_changes() {
        root_files_changed="true"
    fi
 
-    if [[ "$root_files_changed" == "false" ]] && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]] && [[ ${#changed_agent_profiles[@]} -eq 0 ]] && [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
+    if managed_config_wiring_needs_update; then
+        config_wiring_refresh="true"
+    fi
+
+    if [[ "$root_files_changed" == "false" ]] && [[ "$config_wiring_refresh" == "false" ]] && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]] && [[ ${#changed_agent_profiles[@]} -eq 0 ]] && [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
         print_success "Installed skill pack is already up to date"
         verify_sync_operation_result || return 1
         write_install_metadata || return 1
@@ -4248,8 +4280,8 @@ apply_repo_managed_changes() {
         return 0
     fi
 
-    print_info "update plan: manager=$(get_manager_version) repo=$(get_repo_version) installed=$(get_installed_version) changed=${#changed_skills[@]} removed=${#removed_skills[@]} agent_profiles=${#changed_agent_profiles[@]} retired_agent_profiles=${#removed_agent_profiles[@]} root_refresh=$root_files_changed"
-    sync_codex_delta_update "$root_files_changed" "${changed_skills[@]}" || return 1
+    print_info "update plan: manager=$(get_manager_version) repo=$(get_repo_version) installed=$(get_installed_version) changed=${#changed_skills[@]} removed=${#removed_skills[@]} agent_profiles=${#changed_agent_profiles[@]} retired_agent_profiles=${#removed_agent_profiles[@]} root_refresh=$root_files_changed config_refresh=$config_wiring_refresh"
+    sync_codex_delta_update "$root_files_changed" "$config_wiring_refresh" "${changed_skills[@]}" || return 1
     refresh_bootstrap_entry_script_from_repo
 }
 
@@ -4471,6 +4503,7 @@ summarize_skill_pack_update_status() {
     local detail_parts=()
     local skill_name
     local agent_profile_name
+    local config_wiring_refresh="false"
 
     if ! pack_is_installed; then
         printf 'not installed\n'
@@ -4497,7 +4530,11 @@ summarize_skill_pack_update_status() {
         removed_agent_profiles+=("$agent_profile_name")
     done < <(list_removed_repo_managed_agent_profile_names)
 
-    if ! core_files_need_update && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]] && [[ ${#changed_agent_profiles[@]} -eq 0 ]] && [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
+    if managed_config_wiring_needs_update; then
+        config_wiring_refresh="true"
+    fi
+
+    if ! core_files_need_update && [[ "$config_wiring_refresh" == "false" ]] && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]] && [[ ${#changed_agent_profiles[@]} -eq 0 ]] && [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
         printf 'up to date\n'
         return 0
     fi
@@ -4520,6 +4557,10 @@ summarize_skill_pack_update_status() {
 
     if [[ ${#removed_agent_profiles[@]} -gt 0 ]]; then
         detail_parts+=("${#removed_agent_profiles[@]} retired agent profile(s)")
+    fi
+
+    if [[ "$config_wiring_refresh" == "true" ]]; then
+        detail_parts+=("config wiring drift")
     fi
 
     printf 'update available (%s)\n' "$(IFS=", "; echo "${detail_parts[*]}")"
