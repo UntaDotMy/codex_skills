@@ -828,16 +828,23 @@ skill_manager_local_home_agent_override_file() {
 seed_default_local_home_agent_overrides() {
     local override_file
     local seed_result
+    local managed_home_agent_names_file
 
     override_file="$(skill_manager_local_home_agent_override_file)"
     mkdir -p "$(skill_manager_state_directory)"
+    managed_home_agent_names_file="$(mktemp)" || return 1
+    if ! list_repo_agent_profile_names > "$managed_home_agent_names_file"; then
+        rm -f "$managed_home_agent_names_file"
+        return 1
+    fi
 
-    seed_result="$(run_python - "$override_file" <<'PY'
+    if ! seed_result="$(run_python - "$override_file" "$managed_home_agent_names_file" <<'PY'
 from pathlib import Path
 import json
 import sys
 
 override_file = Path(sys.argv[1])
+managed_home_agent_names_file = Path(sys.argv[2])
 if override_file.exists():
     try:
         payload = json.loads(override_file.read_text(encoding="utf-8"))
@@ -848,6 +855,11 @@ if override_file.exists():
 else:
     payload = {}
 
+managed_home_agent_names = {
+    line.strip()
+    for line in managed_home_agent_names_file.read_text(encoding="utf-8").splitlines()
+    if line.strip()
+}
 agent_payload = payload.get("memory-status-reporter", {})
 if agent_payload is None:
     agent_payload = {}
@@ -865,6 +877,12 @@ if agent_payload.get("reasoning_effort") != "low":
     changed = True
 
 payload["memory-status-reporter"] = agent_payload
+for managed_home_agent_name in sorted(managed_home_agent_names):
+    if managed_home_agent_name == "memory-status-reporter":
+        continue
+    if managed_home_agent_name in payload:
+        del payload[managed_home_agent_name]
+        changed = True
 
 if changed or not override_file.exists():
     override_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -872,7 +890,11 @@ if changed or not override_file.exists():
 else:
     print("unchanged")
 PY
-)" || return 1
+    )"; then
+        rm -f "$managed_home_agent_names_file"
+        return 1
+    fi
+    rm -f "$managed_home_agent_names_file"
 
     if [[ "$seed_result" == "updated" ]]; then
         print_success "Seeded local home-agent overrides for memory-status-reporter"
@@ -1284,14 +1306,33 @@ list_removed_repo_managed_skill_names() {
 }
 
 list_removed_repo_managed_agent_profile_names() {
-    local agent_profile_name
+    local tracked_agent_profiles_file
+    local repo_agent_profiles_file
+    local comm_exit_code
 
-    while IFS= read -r agent_profile_name; do
-        [[ -n "$agent_profile_name" ]] || continue
-        if ! grep -qxF -- "$agent_profile_name" < <(list_repo_agent_profile_names); then
-            printf '%s\n' "$agent_profile_name"
-        fi
-    done < <(list_tracked_managed_agent_profile_names) | LC_ALL=C sort
+    tracked_agent_profiles_file="$(mktemp)" || return 1
+    repo_agent_profiles_file="$(mktemp)" || {
+        rm -f "$tracked_agent_profiles_file"
+        return 1
+    }
+
+    if ! list_tracked_managed_agent_profile_names > "$tracked_agent_profiles_file"; then
+        rm -f "$tracked_agent_profiles_file" "$repo_agent_profiles_file"
+        return 1
+    fi
+    if ! list_repo_agent_profile_names > "$repo_agent_profiles_file"; then
+        rm -f "$tracked_agent_profiles_file" "$repo_agent_profiles_file"
+        return 1
+    fi
+
+    LC_ALL=C sort -u -o "$tracked_agent_profiles_file" "$tracked_agent_profiles_file"
+    LC_ALL=C sort -u -o "$repo_agent_profiles_file" "$repo_agent_profiles_file"
+
+    comm -23 "$tracked_agent_profiles_file" "$repo_agent_profiles_file"
+    comm_exit_code=$?
+
+    rm -f "$tracked_agent_profiles_file" "$repo_agent_profiles_file"
+    return $comm_exit_code
 }
 
 list_tracked_home_agent_names_for_skill() {
@@ -3860,14 +3901,226 @@ collect_changed_skills_parallel() {
 }
 
 collect_changed_agent_profile_names() {
+    local home_agent_catalog_file
+    local override_file
+    local python_exit_code
+
+    home_agent_catalog_file="$(mktemp)" || return 1
+    if ! emit_repo_home_agent_catalog > "$home_agent_catalog_file"; then
+        rm -f "$home_agent_catalog_file"
+        return 1
+    fi
+    override_file="$(skill_manager_local_home_agent_override_file)"
+
+    run_python - "$home_agent_catalog_file" "$CODEX_TARGET/agent-profiles" "$override_file" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+home_agent_catalog_file = Path(sys.argv[1])
+agent_profiles_directory = Path(sys.argv[2])
+override_file = Path(sys.argv[3])
+shared_execution_lines = [
+    "Do not call tools directly in this runtime; route all tool work through js_repl with codex.tool(...).",
+    "Before fresh live research on a reusable question, run research_cache.py lookup or an equivalent shared cache check and only browse live for missing, stale, uncertain, or time-sensitive gaps.",
+    "If the request names a function, module, route, or script, keep the first implementation pass anchored to that named scope and widen only when traced impact proves it is required.",
+    "Prefer small, reviewable patch batches, then re-read the touched code and rerun the narrowest proving validation before adding the next batch.",
+    "Do not stop at a workaround that merely appears to pass; confirm the root cause, implement the real fix, and avoid backward compatibility unless it was explicitly requested.",
+    "Keep committed comments and documentation professional, concise, and neutral; avoid first-person and second-person pronouns unless quoting user-provided or source material.",
+    "For non-trivial tasks, keep the scoped completion ledger current and rerun completion_gate.py check before the final answer.",
+    "If a required sub-agent is still running after wait times out, continue non-conflicting local work and wait again until terminal state before finalizing.",
+]
+
+def extract_field(openai_yaml_text: str, field_name: str, required: bool) -> str:
+    field_patterns = {
+        "model": r'^model:\s*(".*")\s*$',
+        "reasoning_effort": r'^reasoning_effort:\s*(".*")\s*$',
+        "default_prompt": r'^\s+default_prompt:\s*(".*")\s*$',
+    }
+    field_pattern = field_patterns[field_name]
+    field_match = re.search(field_pattern, openai_yaml_text, flags=re.MULTILINE)
+    if field_match is None:
+        if required:
+            raise SystemExit(f"Missing {field_name} in agent config")
+        return ""
+    return json.loads(field_match.group(1))
+
+if override_file.exists():
+    payload = json.loads(override_file.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise SystemExit(f"Local home-agent override file must contain a JSON object: {override_file}")
+else:
+    payload = {}
+
+for raw_line in home_agent_catalog_file.read_text(encoding="utf-8").splitlines():
+    if not raw_line.strip():
+        continue
+    home_agent_name, openai_yaml_path_text = raw_line.split("|", 1)
+    openai_yaml_path = Path(openai_yaml_path_text)
+    openai_yaml_text = openai_yaml_path.read_text(encoding="utf-8")
+    default_prompt = extract_field(openai_yaml_text, "default_prompt", required=True)
+    pinned_model = extract_field(openai_yaml_text, "model", required=False)
+    configured_reasoning = extract_field(openai_yaml_text, "reasoning_effort", required=False)
+    default_managed_model = "gpt-5.4"
+    default_managed_reasoning = "medium"
+
+    if home_agent_name == "memory-status-reporter":
+        agent_payload = payload.get(home_agent_name, {}) or {}
+        if not isinstance(agent_payload, dict):
+            raise SystemExit(f"Local home-agent override entry for {home_agent_name} must be a JSON object: {override_file}")
+    else:
+        agent_payload = {}
+
+    local_override_model = agent_payload.get("model", "") or ""
+    local_override_reasoning = agent_payload.get("reasoning_effort", "") or ""
+    effective_model = local_override_model or pinned_model or default_managed_model
+    effective_reasoning = local_override_reasoning or configured_reasoning or default_managed_reasoning
+
+    missing_execution_lines = [line for line in shared_execution_lines if line not in default_prompt]
+    if missing_execution_lines:
+        execution_policy_block = "\n\nExecution policy:\n" + "\n".join(f"- {line}" for line in missing_execution_lines)
+        default_prompt = default_prompt.rstrip() + execution_policy_block
+
+    expected_lines = []
+    if effective_model:
+        expected_lines.append(f'model = "{effective_model}"')
+    if effective_reasoning:
+        expected_lines.append(f'model_reasoning_effort = "{effective_reasoning}"')
+    expected_lines.append("developer_instructions = '''")
+    expected_lines.append(default_prompt)
+    expected_lines.append("'''")
+    expected_text = "\n".join(expected_lines) + "\n"
+
+    target_path = agent_profiles_directory / f"{home_agent_name}.toml"
+    if not target_path.exists() or target_path.read_text(encoding="utf-8") != expected_text:
+        print(home_agent_name)
+PY
+    python_exit_code=$?
+    rm -f "$home_agent_catalog_file"
+    return $python_exit_code
+}
+
+emit_repo_home_agent_catalog() {
+    local skill_name
+    local agent_config_path
+    local home_agent_name
+    local catalog_agent_config_path
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        while IFS= read -r agent_config_path; do
+            [[ -n "$agent_config_path" ]] || continue
+            home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+            catalog_agent_config_path="$agent_config_path"
+            if [[ "$PLATFORM_NAME" == "windows" ]] && command -v cygpath >/dev/null 2>&1; then
+                catalog_agent_config_path="$(cygpath -w "$agent_config_path")"
+            fi
+            printf '%s|%s\n' "$home_agent_name" "$catalog_agent_config_path"
+        done < <(list_skill_agent_config_files "$skill_name")
+    done < <(list_repo_skill_names) | LC_ALL=C sort -u
+}
+
+SKILL_PACK_STATUS_DETAILS_READY="false"
+SKILL_PACK_STATUS_PACK_INSTALLED="false"
+SKILL_PACK_STATUS_ROOT_GUIDANCE_CHANGED="false"
+SKILL_PACK_STATUS_CONFIG_WIRING_REFRESH="false"
+SKILL_PACK_STATUS_SKILL_SCAN_SKIPPED="false"
+SKILL_PACK_STATUS_SKILL_REFRESH_REASON=""
+SKILL_PACK_STATUS_CHANGED_SKILLS=()
+SKILL_PACK_STATUS_REMOVED_SKILLS=()
+SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES=()
+SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES=()
+
+reset_skill_pack_status_details() {
+    SKILL_PACK_STATUS_DETAILS_READY="false"
+    SKILL_PACK_STATUS_PACK_INSTALLED="false"
+    SKILL_PACK_STATUS_ROOT_GUIDANCE_CHANGED="false"
+    SKILL_PACK_STATUS_CONFIG_WIRING_REFRESH="false"
+    SKILL_PACK_STATUS_SKILL_SCAN_SKIPPED="false"
+    SKILL_PACK_STATUS_SKILL_REFRESH_REASON=""
+    SKILL_PACK_STATUS_CHANGED_SKILLS=()
+    SKILL_PACK_STATUS_REMOVED_SKILLS=()
+    SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES=()
+    SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES=()
+}
+
+resolve_skill_pack_status_refresh_reason() {
+    local repo_version
+    local installed_version
+
+    repo_version="$(get_repo_version)"
+    installed_version="$(get_installed_version)"
+
+    if [[ "$installed_version" == "unknown" ]] || [[ "$repo_version" == "unknown" ]]; then
+        printf 'repo version unknown\n'
+        return 0
+    fi
+
+    if [[ "$installed_version" != "$repo_version" ]]; then
+        printf 'repo version changed\n'
+        return 0
+    fi
+
+    if git_repository_available && ! git_worktree_is_clean; then
+        printf 'local repo changes present\n'
+        return 0
+    fi
+
+    return 1
+}
+
+collect_skill_pack_status_details() {
+    local skill_name
     local agent_profile_name
+    local skill_refresh_reason
+
+    reset_skill_pack_status_details
+
+    if ! pack_is_installed; then
+        SKILL_PACK_STATUS_DETAILS_READY="true"
+        return 0
+    fi
+
+    SKILL_PACK_STATUS_PACK_INSTALLED="true"
+
+    if root_guidance_files_need_update; then
+        SKILL_PACK_STATUS_ROOT_GUIDANCE_CHANGED="true"
+    fi
+
+    SKILL_PACK_STATUS_SKILL_SCAN_SKIPPED="true"
+    if skill_refresh_reason="$(resolve_skill_pack_status_refresh_reason)"; then
+        SKILL_PACK_STATUS_SKILL_REFRESH_REASON="$skill_refresh_reason"
+    fi
 
     while IFS= read -r agent_profile_name; do
         [[ -n "$agent_profile_name" ]] || continue
-        if ! verify_agent_profile_sync_match "$agent_profile_name" >/dev/null 2>&1; then
-            printf "%s\n" "$agent_profile_name"
-        fi
-    done < <(list_repo_agent_profile_names)
+        SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES+=("$agent_profile_name")
+    done < <(collect_changed_agent_profile_names)
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        SKILL_PACK_STATUS_REMOVED_SKILLS+=("$skill_name")
+    done < <(list_removed_repo_managed_skill_names)
+
+    while IFS= read -r agent_profile_name; do
+        [[ -n "$agent_profile_name" ]] || continue
+        SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES+=("$agent_profile_name")
+    done < <(list_removed_repo_managed_agent_profile_names)
+
+    if managed_config_wiring_needs_update; then
+        SKILL_PACK_STATUS_CONFIG_WIRING_REFRESH="true"
+    fi
+
+    SKILL_PACK_STATUS_DETAILS_READY="true"
+}
+
+ensure_skill_pack_status_details() {
+    if [[ "$SKILL_PACK_STATUS_DETAILS_READY" == "true" ]]; then
+        return 0
+    fi
+
+    collect_skill_pack_status_details
 }
 
 agent_profiles_need_update() {
@@ -3878,20 +4131,6 @@ agent_profiles_need_update() {
     if [[ -n "$(list_removed_repo_managed_agent_profile_names)" ]]; then
         return 0
     fi
-
-    return 1
-}
-
-skill_needs_update() {
-    local skill_name=$1
-    local changed_skill_name
-
-    while IFS= read -r changed_skill_name; do
-        [[ -n "$changed_skill_name" ]] || continue
-        if [[ "$changed_skill_name" == "$skill_name" ]]; then
-            return 0
-        fi
-    done < <(collect_changed_skills_parallel)
 
     return 1
 }
@@ -3910,6 +4149,55 @@ collect_removed_skills() {
     fi
 
     printf '%s\n' "${removed_skills[@]}"
+}
+
+collect_changed_home_agent_config_section_names() {
+    local home_agent_catalog_file
+    local home_config_file="$CODEX_TARGET/config.toml"
+    local python_exit_code
+
+    [[ -f "$home_config_file" ]] || return 0
+
+    home_agent_catalog_file="$(mktemp)" || return 1
+    if ! emit_repo_home_agent_catalog > "$home_agent_catalog_file"; then
+        rm -f "$home_agent_catalog_file"
+        return 1
+    fi
+
+    run_python - "$home_agent_catalog_file" "$home_config_file" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+home_agent_catalog_file = Path(sys.argv[1])
+home_config_file = Path(sys.argv[2])
+config_text = home_config_file.read_text(encoding="utf-8")
+section_pattern_template = r"(?ms)^\[agents\.{name}\]\n.*?(?=^\[|\Z)"
+short_description_pattern = r'^\s+short_description:\s*(".*")\s*$'
+
+for raw_line in home_agent_catalog_file.read_text(encoding="utf-8").splitlines():
+    if not raw_line.strip():
+        continue
+    home_agent_name, openai_yaml_path_text = raw_line.split("|", 1)
+    openai_yaml_text = Path(openai_yaml_path_text).read_text(encoding="utf-8")
+    short_description_match = re.search(short_description_pattern, openai_yaml_text, flags=re.MULTILINE)
+    if short_description_match is None:
+        raise SystemExit(f"Missing short_description in {openai_yaml_path_text}")
+    expected_description_line = f"description = {json.dumps(json.loads(short_description_match.group(1)))}"
+    expected_config_file_line = f"config_file = {json.dumps(f'agents/{home_agent_name}.toml')}"
+    section_pattern = re.compile(section_pattern_template.format(name=re.escape(home_agent_name)))
+    section_match = section_pattern.search(config_text)
+    if section_match is None:
+        print(home_agent_name)
+        continue
+    section_text = section_match.group(0)
+    if expected_description_line not in section_text or expected_config_file_line not in section_text:
+        print(home_agent_name)
+PY
+    python_exit_code=$?
+    rm -f "$home_agent_catalog_file"
+    return $python_exit_code
 }
 
 core_files_need_update() {
@@ -3943,7 +4231,7 @@ managed_config_wiring_needs_update() {
         return 0
     fi
 
-    if ! verify_home_agent_config_sections_match_repo >/dev/null 2>&1; then
+    if [[ -n "$(collect_changed_home_agent_config_section_names)" ]]; then
         return 0
     fi
 
@@ -3971,14 +4259,9 @@ root_guidance_files_need_update() {
 }
 
 show_checksum_status() {
-    local changed_skills=()
-    local removed_skills=()
-    local changed_agent_profiles=()
-    local removed_agent_profiles=()
-    local skill_name
-    local agent_profile_name
+    ensure_skill_pack_status_details
 
-    if ! pack_is_installed; then
+    if [[ "$SKILL_PACK_STATUS_PACK_INSTALLED" != "true" ]]; then
         echo "  core file checksum status: not installed"
         echo "  skill agent profile checksum status: not installed"
         echo "  skill checksum status: not installed"
@@ -3987,56 +4270,36 @@ show_checksum_status() {
         return 0
     fi
 
-    while IFS= read -r skill_name; do
-        [[ -n "$skill_name" ]] || continue
-        if skill_needs_update "$skill_name"; then
-            changed_skills+=("$skill_name")
-        fi
-    done < <(list_repo_skill_names)
-
-    while IFS= read -r agent_profile_name; do
-        [[ -n "$agent_profile_name" ]] || continue
-        changed_agent_profiles+=("$agent_profile_name")
-    done < <(collect_changed_agent_profile_names)
-
-    if core_files_need_update; then
+    if [[ "$SKILL_PACK_STATUS_ROOT_GUIDANCE_CHANGED" == "true" ]] || [[ "$SKILL_PACK_STATUS_CONFIG_WIRING_REFRESH" == "true" ]] || [[ ${#SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES[@]} -gt 0 ]] || [[ ${#SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES[@]} -gt 0 ]]; then
         echo "  core file checksum status: drift detected"
     else
         echo "  core file checksum status: in sync"
     fi
 
-    if [[ ${#changed_skills[@]} -eq 0 ]]; then
-        echo "  skill checksum status: all installed skills match source"
+    if [[ -n "$SKILL_PACK_STATUS_SKILL_REFRESH_REASON" ]]; then
+        echo "  skill checksum status: quick status detected ${SKILL_PACK_STATUS_SKILL_REFRESH_REASON}; run install or verify for a deep content refresh check"
+    elif [[ "$SKILL_PACK_STATUS_SKILL_SCAN_SKIPPED" == "true" ]]; then
+        echo "  skill checksum status: quick status skipped deep content scan; run verify for byte-level skill content checks"
     else
-        echo "  skill checksum status: drift in ${changed_skills[*]}"
+        echo "  skill checksum status: drift in ${SKILL_PACK_STATUS_CHANGED_SKILLS[*]}"
     fi
 
-    if [[ ${#changed_agent_profiles[@]} -eq 0 ]]; then
+    if [[ ${#SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES[@]} -eq 0 ]]; then
         echo "  skill agent profile checksum status: all installed agent profiles match source"
     else
-        echo "  skill agent profile checksum status: drift in ${changed_agent_profiles[*]}"
+        echo "  skill agent profile checksum status: drift in ${SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES[*]}"
     fi
 
-    while IFS= read -r skill_name; do
-        [[ -n "$skill_name" ]] || continue
-        removed_skills+=("$skill_name")
-    done < <(list_removed_repo_managed_skill_names)
-
-    while IFS= read -r agent_profile_name; do
-        [[ -n "$agent_profile_name" ]] || continue
-        removed_agent_profiles+=("$agent_profile_name")
-    done < <(list_removed_repo_managed_agent_profile_names)
-
-    if [[ ${#removed_skills[@]} -eq 0 ]]; then
+    if [[ ${#SKILL_PACK_STATUS_REMOVED_SKILLS[@]} -eq 0 ]]; then
         echo "  stale managed skills: none"
     else
-        echo "  stale managed skills: ${removed_skills[*]}"
+        echo "  stale managed skills: ${SKILL_PACK_STATUS_REMOVED_SKILLS[*]}"
     fi
 
-    if [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
+    if [[ ${#SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES[@]} -eq 0 ]]; then
         echo "  stale managed agent profiles: none"
     else
-        echo "  stale managed agent profiles: ${removed_agent_profiles[*]}"
+        echo "  stale managed agent profiles: ${SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES[*]}"
     fi
 }
 
@@ -4496,70 +4759,40 @@ summarize_self_update_status() {
 }
 
 summarize_skill_pack_update_status() {
-    local changed_skills=()
-    local removed_skills=()
-    local changed_agent_profiles=()
-    local removed_agent_profiles=()
     local detail_parts=()
-    local skill_name
-    local agent_profile_name
-    local config_wiring_refresh="false"
+    ensure_skill_pack_status_details
 
-    if ! pack_is_installed; then
+    if [[ "$SKILL_PACK_STATUS_PACK_INSTALLED" != "true" ]]; then
         printf 'not installed\n'
         return 0
     fi
 
-    while IFS= read -r skill_name; do
-        [[ -n "$skill_name" ]] || continue
-        changed_skills+=("$skill_name")
-    done < <(collect_changed_skills_parallel)
-
-    while IFS= read -r agent_profile_name; do
-        [[ -n "$agent_profile_name" ]] || continue
-        changed_agent_profiles+=("$agent_profile_name")
-    done < <(collect_changed_agent_profile_names)
-
-    while IFS= read -r skill_name; do
-        [[ -n "$skill_name" ]] || continue
-        removed_skills+=("$skill_name")
-    done < <(list_removed_repo_managed_skill_names)
-
-    while IFS= read -r agent_profile_name; do
-        [[ -n "$agent_profile_name" ]] || continue
-        removed_agent_profiles+=("$agent_profile_name")
-    done < <(list_removed_repo_managed_agent_profile_names)
-
-    if managed_config_wiring_needs_update; then
-        config_wiring_refresh="true"
-    fi
-
-    if ! core_files_need_update && [[ "$config_wiring_refresh" == "false" ]] && [[ ${#changed_skills[@]} -eq 0 ]] && [[ ${#removed_skills[@]} -eq 0 ]] && [[ ${#changed_agent_profiles[@]} -eq 0 ]] && [[ ${#removed_agent_profiles[@]} -eq 0 ]]; then
+    if [[ -z "$SKILL_PACK_STATUS_SKILL_REFRESH_REASON" ]] && [[ "$SKILL_PACK_STATUS_ROOT_GUIDANCE_CHANGED" == "false" ]] && [[ "$SKILL_PACK_STATUS_CONFIG_WIRING_REFRESH" == "false" ]] && [[ ${#SKILL_PACK_STATUS_REMOVED_SKILLS[@]} -eq 0 ]] && [[ ${#SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES[@]} -eq 0 ]] && [[ ${#SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES[@]} -eq 0 ]]; then
         printf 'up to date\n'
         return 0
     fi
 
-    if root_guidance_files_need_update; then
+    if [[ "$SKILL_PACK_STATUS_ROOT_GUIDANCE_CHANGED" == "true" ]]; then
         detail_parts+=("root guidance changed")
     fi
 
-    if [[ ${#changed_skills[@]} -gt 0 ]]; then
-        detail_parts+=("${#changed_skills[@]} skill change(s)")
+    if [[ -n "$SKILL_PACK_STATUS_SKILL_REFRESH_REASON" ]]; then
+        detail_parts+=("$SKILL_PACK_STATUS_SKILL_REFRESH_REASON")
     fi
 
-    if [[ ${#changed_agent_profiles[@]} -gt 0 ]]; then
-        detail_parts+=("${#changed_agent_profiles[@]} agent profile change(s)")
+    if [[ ${#SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES[@]} -gt 0 ]]; then
+        detail_parts+=("${#SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES[@]} agent profile change(s)")
     fi
 
-    if [[ ${#removed_skills[@]} -gt 0 ]]; then
-        detail_parts+=("${#removed_skills[@]} retired skill(s)")
+    if [[ ${#SKILL_PACK_STATUS_REMOVED_SKILLS[@]} -gt 0 ]]; then
+        detail_parts+=("${#SKILL_PACK_STATUS_REMOVED_SKILLS[@]} retired skill(s)")
     fi
 
-    if [[ ${#removed_agent_profiles[@]} -gt 0 ]]; then
-        detail_parts+=("${#removed_agent_profiles[@]} retired agent profile(s)")
+    if [[ ${#SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES[@]} -gt 0 ]]; then
+        detail_parts+=("${#SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES[@]} retired agent profile(s)")
     fi
 
-    if [[ "$config_wiring_refresh" == "true" ]]; then
+    if [[ "$SKILL_PACK_STATUS_CONFIG_WIRING_REFRESH" == "true" ]]; then
         detail_parts+=("config wiring drift")
     fi
 
@@ -4569,6 +4802,8 @@ summarize_skill_pack_update_status() {
 show_status() {
     local self_update_status
     local skill_pack_update_status
+
+    collect_skill_pack_status_details
 
     self_update_status="$(summarize_self_update_status)"
     skill_pack_update_status="$(summarize_skill_pack_update_status)"
@@ -4721,6 +4956,8 @@ show_status() {
     print_info "MD5 Verification:"
     show_checksum_status
     echo ""
+
+    reset_skill_pack_status_details
 }
 
 # Main script

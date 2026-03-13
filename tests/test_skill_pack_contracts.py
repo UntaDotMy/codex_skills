@@ -2993,7 +2993,11 @@ Notes:
                 'sync_codex_home_agents_for_skill "$skill_name" >/dev/null || exit $?; '
                 'done < <(list_repo_skill_names); '
                 'sync_skill_agent_profiles_to_codex >/dev/null; '
+                'sync_managed_config_routing_instructions >/dev/null; '
+                'sync_memory_status_reporter_home_wiring >/dev/null; '
                 'write_install_metadata; '
+                'write_managed_skill_inventory_from_repo; '
+                'write_managed_home_agent_inventory_from_repo; '
                 'write_managed_agent_profile_inventory_from_repo; '
             )
             command = (
@@ -3033,27 +3037,21 @@ Notes:
             )
             self.assertEqual("abcdef1234567890abcdef1234567890", completed_process.stdout.strip())
 
-    def test_skill_pack_status_is_up_to_date_after_syncing_skill_agent_profiles(self) -> None:
+    def test_skill_pack_status_is_up_to_date_when_no_drift_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             sourced_script_path = write_sync_script_without_main(temporary_path)
-            setup_command = (
-                'mkdir -p "$CODEX_TARGET/agents" "$CODEX_TARGET/agent-profiles" "$(skill_manager_state_directory)"; '
-                'seed_default_local_home_agent_overrides >/dev/null; '
-                'sync_root_guidance_files >/dev/null; '
-                'while IFS= read -r skill_name; do '
-                'sync_codex_home_agents_for_skill "$skill_name" >/dev/null || exit $?; '
-                'done < <(list_repo_skill_names); '
-                'sync_skill_agent_profiles_to_codex >/dev/null; '
-                'write_install_metadata; '
-                'write_managed_agent_profile_inventory_from_repo; '
-            )
             command = (
                 f'source "{sourced_script_path}"; '
                 f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
                 f'CODEX_TARGET="{temporary_path / ".codex"}"; '
-                f'{setup_command}'
+                'mkdir -p "$CODEX_TARGET/agent-profiles" "$(skill_manager_state_directory)"; '
+                'write_install_metadata; '
+                'write_managed_agent_profile_inventory_from_repo; '
                 'collect_changed_skills_parallel() { return 0; }; '
+                'collect_changed_agent_profile_names() { return 0; }; '
+                'managed_config_wiring_needs_update() { return 1; }; '
+                'git_repository_available() { return 1; }; '
                 'root_guidance_files_need_update() { return 1; }; '
                 'list_removed_repo_managed_skill_names() { return 0; }; '
                 'list_removed_repo_managed_agent_profile_names() { return 0; }; '
@@ -3067,8 +3065,9 @@ Notes:
                 completed_process.returncode,
                 completed_process.stdout + completed_process.stderr,
             )
+            self.assertEqual("up to date", completed_process.stdout.strip())
 
-    def test_install_seed_populates_memory_writer_fast_lane_without_clobbering_other_entries(self) -> None:
+    def test_install_seed_populates_memory_writer_fast_lane_and_prunes_repo_managed_non_memory_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
             sourced_script_path = write_sync_script_without_main(temporary_path)
@@ -3079,6 +3078,10 @@ Notes:
                 'mkdir -p "$(skill_manager_state_directory)"; '
                 'cat > "$(skill_manager_local_home_agent_override_file)" <<\'JSON\'\n'
                 '{\n'
+                '  "reviewer": {\n'
+                '    "model": "gpt-5.4",\n'
+                '    "reasoning_effort": "low"\n'
+                '  },\n'
                 '  "custom-helper": {\n'
                 '    "model": "gpt-5.4"\n'
                 '  }\n'
@@ -3097,6 +3100,29 @@ Notes:
             self.assertEqual({"model": "gpt-5.4"}, payload["custom-helper"])
             self.assertEqual("gpt-5.4", payload["memory-status-reporter"]["model"])
             self.assertEqual("low", payload["memory-status-reporter"]["reasoning_effort"])
+            self.assertNotIn("reviewer", payload)
+
+    def test_install_seed_removes_temp_file_when_repo_inventory_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                f'export TMPDIR="{temporary_path / "tmp"}"; '
+                'mkdir -p "$TMPDIR" "$(skill_manager_state_directory)"; '
+                'list_repo_agent_profile_names() { return 1; }; '
+                'if seed_default_local_home_agent_overrides >/dev/null 2>&1; then exit 1; fi; '
+                'printf "temp_files=%s\n" "$(find "$TMPDIR" -maxdepth 1 -type f | wc -l | tr -d " ")"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertIn("temp_files=0", completed_process.stdout)
 
     def test_non_memory_managed_agent_overrides_are_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -3135,6 +3161,81 @@ Notes:
             override_payload = json.loads(override_text)
             self.assertEqual("low", override_payload["reviewer"]["reasoning_effort"])
             self.assertEqual({"model": "gpt-5.4"}, override_payload["custom-helper"])
+
+    def test_show_status_skips_deep_skill_drift_scan_in_quick_status_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agents" "$CODEX_TARGET/agent-profiles" "$CODEX_TARGET/memories/workspaces" "$CODEX_TARGET/memories/agents" "$CODEX_TARGET/memories/research_cache" "$CODEX_TARGET/memories/archive"; '
+                'pack_is_installed() { return 0; }; '
+                'collect_changed_agent_profile_names() { return 0; }; '
+                'managed_config_wiring_needs_update() { return 1; }; '
+                'root_guidance_files_need_update() { return 1; }; '
+                'list_removed_repo_managed_skill_names() { return 0; }; '
+                'list_removed_repo_managed_agent_profile_names() { return 0; }; '
+                'status_counter_file="$(mktemp)"; '
+                'printf "0" > "$status_counter_file"; '
+                'collect_changed_skills_parallel() { local status_counter_value; status_counter_value="$(cat "$status_counter_file")"; status_counter_value="$((status_counter_value + 1))"; printf "%s" "$status_counter_value" > "$status_counter_file"; return 0; }; '
+                'show_status >/dev/null; '
+                'printf "calls=%s\n" "$(cat "$status_counter_file")"; '
+                'rm -f "$status_counter_file"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertIn("calls=0", completed_process.stdout)
+
+    def test_removed_agent_profile_detection_builds_repo_inventory_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                'repo_inventory_counter_file="$(mktemp)"; '
+                'printf "0" > "$repo_inventory_counter_file"; '
+                'list_tracked_managed_agent_profile_names() { printf "reviewer\\nlegacy-helper\\n"; }; '
+                'list_repo_agent_profile_names() { local repo_inventory_counter_value; repo_inventory_counter_value="$(cat "$repo_inventory_counter_file")"; repo_inventory_counter_value="$((repo_inventory_counter_value + 1))"; printf "%s" "$repo_inventory_counter_value" > "$repo_inventory_counter_file"; printf "reviewer\\n"; }; '
+                'removed_profiles="$(list_removed_repo_managed_agent_profile_names)"; '
+                'printf "removed=%s\\n" "$removed_profiles"; '
+                'printf "calls=%s\\n" "$(cat "$repo_inventory_counter_file")"; '
+                'rm -f "$repo_inventory_counter_file"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertIn("removed=legacy-helper", completed_process.stdout)
+            self.assertIn("calls=1", completed_process.stdout)
+
+    def test_removed_agent_profile_detection_removes_temp_files_when_repo_inventory_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'export TMPDIR="{temporary_path / "tmp"}"; '
+                'mkdir -p "$TMPDIR"; '
+                'list_tracked_managed_agent_profile_names() { printf "reviewer\\n"; }; '
+                'list_repo_agent_profile_names() { return 1; }; '
+                'if list_removed_repo_managed_agent_profile_names >/dev/null 2>&1; then exit 1; fi; '
+                'printf "temp_files=%s\n" "$(find "$TMPDIR" -maxdepth 1 -type f | wc -l | tr -d " ")"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertIn("temp_files=0", completed_process.stdout)
 
     def test_sync_root_guidance_files_copies_runtime_reference_docs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
