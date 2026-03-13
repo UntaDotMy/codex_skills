@@ -330,6 +330,16 @@ resolve_codex_target_directory() {
 PLATFORM_NAME="$(detect_platform_name)"
 CODEX_TARGET="$(resolve_codex_target_directory)"
 
+MANAGED_ROUTING_REQUIRED_CONFIG_LINES=(
+    "- Route directly to the primary domain skill when the task clearly belongs to one surface."
+    "- Use software-development-life-cycle when the work is mainly sequencing, cross-domain planning, or architecture framing."
+    "- Start with reviewer only for audits, production-readiness checks, explicit gap-finding, or final validation."
+    "- Return to reviewer for the final quality check when a separate implementation skill owned the work."
+    "- Route to git-expert for repository-state, branching, and recovery work."
+    "- If a non-trivial task clearly belongs to one specialist surface, do not stay solo by default; route to that owning skill or staff a bounded specialist lane instead of keeping all work in the main lane."
+    "- Load specialist skills when the task clearly requires domain expertise: reviewer, software-development-life-cycle, web-development-life-cycle, mobile-development-life-cycle, backend-and-data-architecture, cloud-and-devops-expert, qa-and-automation-engineer, security-and-compliance-auditor, ui-design-systems-and-responsive-interfaces, ux-research-and-experience-strategy, git-expert, and memory-status-reporter."
+)
+
 MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- Route to memory-status-reporter for memory status, daily learning recaps, mistake ledgers, user-needs summaries, and heuristic growth reporting."
     "- When durable memory must change, delegate the write to memory-status-reporter when that lane is available, let it report what changed, and validate the touched memory files before finalizing."
@@ -374,6 +384,36 @@ config_has_required_memory_status_lines() {
     done
 
     return 0
+}
+
+config_has_required_managed_routing_lines() {
+    local config_file=$1
+    local required_line
+
+    [[ -f "$config_file" ]] || return 1
+
+    for required_line in "${MANAGED_ROUTING_REQUIRED_CONFIG_LINES[@]}"; do
+        if ! grep -qF -- "$required_line" "$config_file"; then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+config_has_any_managed_routing_lines() {
+    local config_file=$1
+    local required_line
+
+    [[ -f "$config_file" ]] || return 1
+
+    for required_line in "${MANAGED_ROUTING_REQUIRED_CONFIG_LINES[@]}"; do
+        if grep -qF -- "$required_line" "$config_file"; then
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 config_has_any_memory_status_lines() {
@@ -894,7 +934,7 @@ pack_has_repo_managed_files() {
         return 0
     fi
 
-    if [[ -f "$CODEX_TARGET/agents/memory-status-reporter.toml" ]] || config_has_any_memory_status_lines "$CODEX_TARGET/config.toml"; then
+    if [[ -f "$CODEX_TARGET/agents/memory-status-reporter.toml" ]] || config_has_any_memory_status_lines "$CODEX_TARGET/config.toml" || config_has_any_managed_routing_lines "$CODEX_TARGET/config.toml" || config_has_any_repo_managed_agent_sections "$CODEX_TARGET/config.toml"; then
         return 0
     fi
 
@@ -1291,6 +1331,31 @@ detect_python_launcher() {
         echo "py -3"
         return 0
     fi
+
+    return 1
+}
+
+config_has_agent_section() {
+    local config_file=$1
+    local home_agent_name=$2
+    local section_header="[agents.$home_agent_name]"
+
+    [[ -f "$config_file" ]] || return 1
+    grep -qF -- "$section_header" "$config_file"
+}
+
+config_has_any_repo_managed_agent_sections() {
+    local config_file=$1
+    local home_agent_name
+
+    [[ -f "$config_file" ]] || return 1
+
+    while IFS= read -r home_agent_name; do
+        [[ -n "$home_agent_name" ]] || continue
+        if config_has_agent_section "$config_file" "$home_agent_name"; then
+            return 0
+        fi
+    done < <(list_repo_agent_profile_names)
 
     return 1
 }
@@ -1903,6 +1968,94 @@ verify_memory_status_reporter_home_wiring_present() {
     return 0
 }
 
+verify_managed_config_routing_present() {
+    local home_config_file="$CODEX_TARGET/config.toml"
+
+    if ! config_has_required_managed_routing_lines "$home_config_file"; then
+        print_error "Codex home config is missing required managed routing instructions: $home_config_file"
+        return 1
+    fi
+
+    print_success "Managed routing config verified"
+    return 0
+}
+
+verify_home_agent_config_section_sync_match() {
+    local openai_yaml_path=$1
+    local home_agent_name=$2
+    local home_config_file="$CODEX_TARGET/config.toml"
+    local short_description
+
+    if [[ ! -f "$home_config_file" ]]; then
+        print_error "Codex home config is missing: $home_config_file"
+        return 1
+    fi
+
+    short_description=$(extract_codex_openai_value "$openai_yaml_path" "short_description") || {
+        print_error "Unable to extract short_description for $home_agent_name"
+        return 1
+    }
+
+    run_python - "$home_config_file" "$home_agent_name" "$short_description" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+config_path = Path(sys.argv[1])
+home_agent_name = sys.argv[2]
+short_description = sys.argv[3]
+config_text = config_path.read_text(encoding="utf-8")
+
+section_pattern = re.compile(rf"(?ms)^\[agents\.{re.escape(home_agent_name)}\]\n.*?(?=^\[|\Z)")
+section_match = section_pattern.search(config_text)
+if section_match is None:
+    raise SystemExit(f"Missing [agents.{home_agent_name}] section in {config_path}")
+
+section_text = section_match.group(0)
+expected_description_line = f"description = {json.dumps(short_description)}"
+expected_config_file_line = f"config_file = {json.dumps(f'agents/{home_agent_name}.toml')}"
+
+if expected_description_line not in section_text:
+    raise SystemExit(
+        f"[agents.{home_agent_name}] section has unexpected description in {config_path}"
+    )
+if expected_config_file_line not in section_text:
+    raise SystemExit(
+        f"[agents.{home_agent_name}] section has unexpected config_file path in {config_path}"
+    )
+PY
+
+    print_success "Config section verified for managed home agent: $home_agent_name"
+    return 0
+}
+
+verify_home_agent_config_sections_match_repo() {
+    local skill_name
+    local agent_config_path
+    local home_agent_name
+    local failed=0
+
+    while IFS= read -r skill_name; do
+        [[ -n "$skill_name" ]] || continue
+        while IFS= read -r agent_config_path; do
+            [[ -n "$agent_config_path" ]] || continue
+            home_agent_name="$(home_agent_name_from_agent_config "$skill_name" "$agent_config_path")"
+            if ! verify_home_agent_config_section_sync_match "$agent_config_path" "$home_agent_name"; then
+                failed=1
+            fi
+        done < <(list_skill_agent_config_files "$skill_name")
+    done < <(list_repo_skill_names)
+
+    if [[ $failed -eq 0 ]]; then
+        print_success "Managed [agents.*] config sections verified"
+        return 0
+    fi
+
+    print_error "One or more managed [agents.*] config sections are missing or mismatched"
+    return 1
+}
+
 verify_synced_skill_and_home_agent_presence() {
     local skill_name
     local skill_path
@@ -1975,6 +2128,8 @@ verify_sync_operation_health() {
     done < <(list_removed_repo_managed_agent_profile_names)
 
     run_task_line "verify managed inventories" verify_managed_inventory_files_match_repo || failed=1
+    run_task_line "verify managed routing config" verify_managed_config_routing_present || failed=1
+    run_task_line "verify agent config sections" verify_home_agent_config_sections_match_repo || failed=1
     run_task_line "verify memory wiring" verify_memory_status_reporter_home_wiring_present || failed=1
     run_task_line "verify runtime hygiene" verify_repo_managed_installation_hygiene || failed=1
 
@@ -3119,7 +3274,8 @@ sync_codex_home_agent_from_yaml() {
     local home_agent_name=$3
     local home_agent_file="$CODEX_TARGET/agents/$home_agent_name.toml"
 
-    write_codex_agent_toml "$openai_yaml_path" "$home_agent_file" "$home_agent_name" "home-agent"
+    write_codex_agent_toml "$openai_yaml_path" "$home_agent_file" "$home_agent_name" "home-agent" || return 1
+    sync_codex_home_agent_config_section_from_yaml "$openai_yaml_path" "$home_agent_name" || return 1
     print_success "Synced $home_agent_name home agent config to Codex"
     return 0
 }
@@ -3132,6 +3288,116 @@ sync_codex_agent_profile_from_yaml() {
 
     write_codex_agent_toml "$openai_yaml_path" "$agent_profile_file" "$home_agent_name" "agent-profile"
     print_success "Synced $home_agent_name agent profile to Codex"
+    return 0
+}
+
+sync_codex_home_agent_config_section_from_yaml() {
+    local openai_yaml_path=$1
+    local home_agent_name=$2
+    local home_config_file="$CODEX_TARGET/config.toml"
+    local short_description
+
+    if [[ ! -f "$openai_yaml_path" ]]; then
+        print_warning "Skipping home config section sync for $home_agent_name because $openai_yaml_path is missing"
+        return 0
+    fi
+
+    short_description=$(extract_codex_openai_value "$openai_yaml_path" "short_description") || {
+        print_error "Unable to extract short_description for $home_agent_name"
+        return 1
+    }
+
+    run_python - "$home_config_file" "$home_agent_name" "$short_description" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+home_config_file = Path(sys.argv[1])
+home_agent_name = sys.argv[2]
+short_description = sys.argv[3]
+config_file_relative_path = f"agents/{home_agent_name}.toml"
+config_text = home_config_file.read_text(encoding="utf-8") if home_config_file.exists() else ""
+
+agent_section = (
+    f"[agents.{home_agent_name}]\n"
+    f"description = {json.dumps(short_description)}\n"
+    f"config_file = {json.dumps(config_file_relative_path)}\n"
+)
+
+section_pattern = re.compile(rf"(?ms)^\[agents\.{re.escape(home_agent_name)}\]\n.*?(?=^\[|\Z)")
+if section_pattern.search(config_text):
+    config_text = section_pattern.sub(agent_section + "\n", config_text, count=1)
+else:
+    if config_text and not config_text.endswith("\n"):
+        config_text += "\n"
+    if config_text.strip():
+        config_text += "\n"
+    config_text += agent_section
+
+home_config_file.write_text(config_text, encoding="utf-8")
+PY
+
+    print_success "Synced [agents.$home_agent_name] config section to Codex"
+    return 0
+}
+
+sync_managed_config_routing_instructions() {
+    local home_config_file="$CODEX_TARGET/config.toml"
+    local required_routing_lines_file
+
+    required_routing_lines_file="$(mktemp)"
+    printf '%s\n' "${MANAGED_ROUTING_REQUIRED_CONFIG_LINES[@]}" > "$required_routing_lines_file"
+
+    run_python - "$home_config_file" "$required_routing_lines_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+home_config_file = Path(sys.argv[1])
+routing_lines = [
+    line
+    for line in Path(sys.argv[2]).read_text(encoding="utf-8").splitlines()
+    if line.strip()
+]
+block_header = "Managed skill-pack routing:"
+block_footer = "Managed skill-pack routing end."
+managed_block = "\n".join([block_header, *routing_lines, block_footer])
+config_text = home_config_file.read_text(encoding="utf-8") if home_config_file.exists() else ""
+
+if "developer_instructions = '''" not in config_text:
+    config_text = "developer_instructions = '''\n'''\n\n" + config_text.lstrip()
+
+developer_instructions_close = "\n'''"
+execution_policy_anchor = "Execution policy:"
+block_pattern = re.compile(
+    rf"{re.escape(block_header)}\n.*?\n{re.escape(block_footer)}\n?",
+    flags=re.DOTALL,
+)
+
+if block_pattern.search(config_text):
+    config_text = block_pattern.sub(managed_block + "\n", config_text, count=1)
+elif execution_policy_anchor in config_text:
+    config_text = config_text.replace(
+        execution_policy_anchor,
+        managed_block + "\n\n" + execution_policy_anchor,
+        1,
+    )
+elif developer_instructions_close in config_text:
+    config_text = config_text.replace(
+        developer_instructions_close,
+        "\n" + managed_block + developer_instructions_close,
+        1,
+    )
+else:
+    config_text = config_text.rstrip() + "\n" + managed_block + "\n"
+
+home_config_file.write_text(config_text, encoding="utf-8")
+PY
+
+    rm -f "$required_routing_lines_file"
+
+    print_success "Synced managed routing into Codex config.toml developer_instructions"
     return 0
 }
 
@@ -3202,26 +3468,24 @@ sync_memory_status_reporter_home_wiring() {
         return 0
     fi
 
-    local short_description
-    short_description=$(extract_codex_openai_value "$openai_yaml_path" "short_description") || {
-        print_error "Unable to extract short_description for $skill_name"
+    if ! sync_managed_config_routing_instructions; then
+        print_error "Failed to sync managed routing into Codex config.toml"
         return 1
-    }
+    fi
 
     required_execution_lines_file="$(mktemp)"
     printf '%s\n' "${MEMORY_STATUS_REQUIRED_CONFIG_LINES[@]:1}" > "$required_execution_lines_file"
 
-    run_python - "$home_config_file" "$routing_line" "$short_description" "$required_execution_lines_file" <<'PY'
+    run_python - "$home_config_file" "$routing_line" "$required_execution_lines_file" <<'PY'
 from pathlib import Path
 import re
 import sys
 
 home_config_file = Path(sys.argv[1])
 routing_line = sys.argv[2]
-short_description = sys.argv[3]
 required_execution_lines = [
     line
-    for line in Path(sys.argv[4]).read_text(encoding="utf-8").splitlines()
+    for line in Path(sys.argv[3]).read_text(encoding="utf-8").splitlines()
     if line.strip()
 ]
 config_text = home_config_file.read_text(encoding="utf-8") if home_config_file.exists() else ""
@@ -3262,24 +3526,11 @@ else:
         else:
             config_text = config_text.rstrip() + execution_policy_block + "\n"
 
-memory_status_agent_block = (
-    "[agents.memory-status-reporter]\n"
-    f'description = "{short_description}"\n'
-    'config_file = "agents/memory-status-reporter.toml"\n'
-)
-
-section_pattern = re.compile(r"(?ms)^\[agents\.memory-status-reporter\]\n.*?(?=^\[|\Z)")
-if section_pattern.search(config_text):
-    config_text = section_pattern.sub(memory_status_agent_block + "\n", config_text, count=1)
-else:
-    if not config_text.endswith("\n"):
-        config_text += "\n"
-    config_text += "\n" + memory_status_agent_block
-
 home_config_file.write_text(config_text, encoding="utf-8")
 PY
 
     rm -f "$required_execution_lines_file"
+    sync_codex_home_agent_config_section_from_yaml "$openai_yaml_path" "$skill_name" || return 1
 
     print_success "Synced $skill_name global routing into Codex config.toml"
     return 0
@@ -3774,6 +4025,8 @@ remove_home_agent_installation() {
         rm -f "$CODEX_TARGET/agent-profiles/$home_agent_name.toml"
     fi
 
+    strip_codex_home_agent_config_section "$home_agent_name"
+
     remove_home_agent_from_managed_inventory "$skill_name" "$home_agent_name"
     remove_agent_profile_from_managed_inventory "$home_agent_name"
 }
@@ -3827,7 +4080,6 @@ config_text = config_text.replace("\n" + routing_line, "")
 for required_line in required_execution_lines:
     config_text = config_text.replace(required_line + "\n", "")
 config_text = re.sub(r"\nExecution policy:\n(?=\n|''')", "\n", config_text)
-config_text = re.sub(r"(?ms)^\[agents\.memory-status-reporter\]\n.*?(?=^\[|\Z)", "", config_text)
 config_text = re.sub(r"\n{3,}", "\n\n", config_text).strip() + "\n"
 config_path.write_text(config_text, encoding="utf-8")
 PY
@@ -3835,11 +4087,56 @@ PY
     rm -f "$required_execution_lines_file"
 }
 
+strip_managed_config_routing_instructions() {
+    local home_config_file="$CODEX_TARGET/config.toml"
+
+    [[ -f "$home_config_file" ]] || return 0
+
+    run_python - "$home_config_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+config_path = Path(sys.argv[1])
+config_text = config_path.read_text(encoding="utf-8")
+block_header = "Managed skill-pack routing:"
+block_footer = "Managed skill-pack routing end."
+block_pattern = re.compile(
+    rf"{re.escape(block_header)}\n.*?\n{re.escape(block_footer)}\n?",
+    flags=re.DOTALL,
+)
+config_text = block_pattern.sub("", config_text)
+config_text = re.sub(r"\n{3,}", "\n\n", config_text).strip()
+config_path.write_text((config_text + "\n") if config_text else "", encoding="utf-8")
+PY
+}
+
+strip_codex_home_agent_config_section() {
+    local home_agent_name=$1
+    local home_config_file="$CODEX_TARGET/config.toml"
+
+    [[ -f "$home_config_file" ]] || return 0
+
+    run_python - "$home_config_file" "$home_agent_name" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+config_path = Path(sys.argv[1])
+home_agent_name = sys.argv[2]
+config_text = config_path.read_text(encoding="utf-8")
+section_pattern = re.compile(rf"(?ms)^\[agents\.{re.escape(home_agent_name)}\]\n.*?(?=^\[|\Z)")
+config_text = section_pattern.sub("", config_text)
+config_text = re.sub(r"\n{3,}", "\n\n", config_text).strip()
+config_path.write_text((config_text + "\n") if config_text else "", encoding="utf-8")
+PY
+}
+
 remove_skill_installation() {
     local skill_name=$1
     local home_agent_name
 
-    if [[ "$skill_name" == "memory-status-reporter" ]] && [[ -f "$CODEX_TARGET/config.toml" ]]; then
+    if [[ -f "$CODEX_TARGET/config.toml" ]]; then
         ensure_python_launcher || return 1
     fi
 
@@ -3876,6 +4173,8 @@ remove_skill_pack() {
         [[ -n "$skill_name" ]] || continue
         remove_skill_installation "$skill_name"
     done < <(list_tracked_managed_skill_names)
+
+    strip_managed_config_routing_instructions
 
     for legacy_agent_profile_name in default explorer worker architect awaiter; do
         rm -f "$CODEX_TARGET/agent-profiles/$legacy_agent_profile_name.toml"
@@ -4269,6 +4568,7 @@ show_status() {
    local codex_home_agent_explicit=0
    local codex_home_agent_medium=0
    local codex_home_agent_non_medium=()
+   local codex_home_agent_config_sections=0
     local codex_agent_profile_total=0
     local codex_agent_profile_synced=0
     local codex_agent_profile_medium=0
@@ -4298,6 +4598,9 @@ show_status() {
                    else
                        codex_home_agent_non_medium+=("$home_agent_name")
                    fi
+               fi
+               if config_has_agent_section "$CODEX_TARGET/config.toml" "$home_agent_name"; then
+                   ((codex_home_agent_config_sections+=1))
                fi
                 if [[ -f "$agent_profile_file" ]]; then
                     ((codex_agent_profile_synced+=1))
@@ -4341,6 +4644,14 @@ show_status() {
         echo "  memory-status-reporter config: missing"
     fi
 
+    if config_has_required_managed_routing_lines "$CODEX_TARGET/config.toml"; then
+        echo "  managed routing config: synced"
+    elif config_has_any_managed_routing_lines "$CODEX_TARGET/config.toml"; then
+        echo "  managed routing config: partial"
+    else
+        echo "  managed routing config: missing"
+    fi
+
    if [[ -d "$CODEX_TARGET/memories/workspaces" ]] && [[ -d "$CODEX_TARGET/memories/agents" ]] && [[ -d "$CODEX_TARGET/memories/research_cache" ]] && [[ -d "$CODEX_TARGET/memories/archive" ]]; then
        echo "  memory scope layout: synced"
    else
@@ -4355,12 +4666,14 @@ show_status() {
     if [[ $codex_home_agent_total -gt 0 ]]; then
         echo "  agent explicit wiring: $codex_home_agent_explicit/$codex_home_agent_total"
         echo "  agent medium baseline: $codex_home_agent_medium/$codex_home_agent_total"
+        echo "  agent config sections: $codex_home_agent_config_sections/$codex_home_agent_total"
         if [[ ${#codex_home_agent_non_medium[@]} -gt 0 ]]; then
             echo "  agent non-medium overrides: ${codex_home_agent_non_medium[*]}"
         fi
     else
         echo "  agent explicit wiring: 0/0"
         echo "  agent medium baseline: 0/0"
+        echo "  agent config sections: 0/0"
     fi
 
     echo ""

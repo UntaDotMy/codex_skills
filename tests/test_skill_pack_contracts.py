@@ -2593,6 +2593,7 @@ Notes:
                 'list_removed_repo_managed_skill_names() { return 0; }; '
                 'list_removed_repo_managed_agent_profile_names() { return 0; }; '
                 'verify_managed_inventory_files_match_repo() { printf "inventories-verified\n" >&2; return 0; }; '
+                'verify_managed_config_routing_present() { printf "routing-verified\n" >&2; return 0; }; '
                 'verify_memory_status_reporter_home_wiring_present() { printf "wiring-verified\n" >&2; return 0; }; '
                 'verify_repo_managed_installation_hygiene() { printf "hygiene-verified\n" >&2; return 0; }; '
                 'collect_failed_checksum_skill_names_parallel() { printf "unexpected-full-skill-checksum\n" >&2; return 99; }; '
@@ -2604,6 +2605,7 @@ Notes:
             normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
             self.assertIn("root-verified:AGENTS.md", normalized_output)
             self.assertIn("agent-profile-verified:reviewer", normalized_output)
+            self.assertIn("routing-verified", normalized_output)
             self.assertIn("Fast install/update verification passed", normalized_output)
             self.assertNotIn("unexpected-full-skill-checksum", normalized_output)
 
@@ -3163,7 +3165,140 @@ Notes:
                 'assert \"sandbox_mode = \\\"workspace-write\\\"\" in config_text\n'
                 'assert \"[agents.custom-helper]\\n\" in config_text\n'
                 'assert \"description = \\\"User-owned custom helper\\\"\" in config_text\n'
+                'assert \"Managed skill-pack routing:\" in config_text\n'
+                'assert \"Route to git-expert for repository-state, branching, and recovery work.\" in config_text\n'
+                'assert \"Use software-development-life-cycle when the work is mainly sequencing, cross-domain planning, or architecture framing.\" in config_text\n'
                 'assert \"[agents.memory-status-reporter]\" in config_text\n'
+                'PY'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+
+    def test_sync_home_agent_updates_config_section_for_managed_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agents"; '
+                'cat > "$CODEX_TARGET/config.toml" <<\'EOF\'\n'
+                'model = "gpt-5.4"\n'
+                'developer_instructions = \'\'\'\n'
+                'User-owned top-level instructions.\n'
+                '\'\'\'\n'
+                '[agents.custom-helper]\n'
+                'description = "User-owned custom helper"\n'
+                'config_file = "agents/custom-helper.toml"\n'
+                'EOF\n'
+                'sync_codex_home_agent_from_yaml "reviewer" "$CODEX_SOURCE/reviewer/agents/openai.yaml" "reviewer" >/dev/null; '
+                'python3 - "$CODEX_TARGET/config.toml" <<\'PY\'\n'
+                'from pathlib import Path\n'
+                'import sys\n'
+                'config_text = Path(sys.argv[1]).read_text(encoding="utf-8")\n'
+                'assert "[agents.custom-helper]\\n" in config_text\n'
+                'assert "[agents.reviewer]\\n" in config_text\n'
+                'assert "description = \\\"Final code and PRD production-readiness reviewer\\\"" in config_text\n'
+                'assert "config_file = \\\"agents/reviewer.toml\\\"" in config_text\n'
+                'PY'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+
+    def test_remove_home_agent_installation_prunes_managed_config_section_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agents" "$CODEX_TARGET/agent-profiles"; '
+                'printf "model = \\\"gpt-5.4\\\"\n" > "$CODEX_TARGET/agents/reviewer.toml"; '
+                'printf "model = \\\"gpt-5.4\\\"\n" > "$CODEX_TARGET/agent-profiles/reviewer.toml"; '
+                'cat > "$CODEX_TARGET/config.toml" <<\'EOF\'\n'
+                'developer_instructions = \'\'\'\n'
+                'User-owned top-level instructions.\n'
+                '\'\'\'\n'
+                '[agents.reviewer]\n'
+                'description = "Managed reviewer section"\n'
+                'config_file = "agents/reviewer.toml"\n'
+                '\n'
+                '[agents.custom-helper]\n'
+                'description = "User-owned custom helper"\n'
+                'config_file = "agents/custom-helper.toml"\n'
+                'EOF\n'
+                'remove_home_agent_installation "reviewer" "reviewer"; '
+                'python3 - "$CODEX_TARGET/config.toml" <<\'PY\'\n'
+                'from pathlib import Path\n'
+                'import sys\n'
+                'config_text = Path(sys.argv[1]).read_text(encoding="utf-8")\n'
+                'assert "[agents.reviewer]" not in config_text\n'
+                'assert "[agents.custom-helper]\\n" in config_text\n'
+                'PY\n'
+                'test ! -f "$CODEX_TARGET/agents/reviewer.toml"; '
+                'test ! -f "$CODEX_TARGET/agent-profiles/reviewer.toml"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+
+    def test_verify_home_agent_config_sections_match_repo_after_home_agent_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agents" "$CODEX_TARGET/agent-profiles" "$CODEX_TARGET"; '
+                'while IFS= read -r skill_name; do sync_codex_home_agents_for_skill "$skill_name" >/dev/null || exit $?; done < <(list_repo_skill_names); '
+                'sync_memory_status_reporter_home_wiring >/dev/null; '
+                'verify_home_agent_config_sections_match_repo'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+
+    def test_strip_managed_config_routing_instructions_preserves_user_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET"; '
+                'cat > "$CODEX_TARGET/config.toml" <<\'EOF\'\n'
+                'developer_instructions = \'\'\'\n'
+                'User-owned top-level instructions stay here.\n'
+                'Managed skill-pack routing:\n'
+                '- Route directly to the primary domain skill when the task clearly belongs to one surface.\n'
+                'Managed skill-pack routing end.\n'
+                '\'\'\'\n'
+                'EOF\n'
+                'strip_managed_config_routing_instructions; '
+                'python3 - "$CODEX_TARGET/config.toml" <<\'PY\'\n'
+                'from pathlib import Path\n'
+                'import sys\n'
+                'config_text = Path(sys.argv[1]).read_text(encoding="utf-8")\n'
+                'assert "User-owned top-level instructions stay here." in config_text\n'
+                'assert "Managed skill-pack routing:" not in config_text\n'
                 'PY'
             )
             completed_process = run_bash(command)
