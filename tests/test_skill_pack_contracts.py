@@ -448,6 +448,21 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("runtime-guardrails-and-memory-protocols.md", readme_text)
         self.assertIn("open-source-memory-patterns.md", readme_text)
         self.assertIn("security-audit-status.md", readme_text)
+        self.assertIn("Why This Repo Exists", readme_text)
+        self.assertIn("What This Repo Covers", readme_text)
+        self.assertIn("Architecture At A Glance", readme_text)
+        self.assertIn("Validation Defaults", readme_text)
+        self.assertIn("Continuous Validation", readme_text)
+        self.assertIn("Repository Standards", readme_text)
+        self.assertIn("native-cli-migration-plan.md", readme_text)
+        self.assertIn("CONTRIBUTING.md", readme_text)
+        self.assertIn("SECURITY.md", readme_text)
+        self.assertIn("run `verify`, then run `status`", readme_text)
+        self.assertIn("./sync-skills.sh verify", readme_text)
+        self.assertIn("./sync-skills.ps1 verify", readme_text)
+        self.assertIn("update/verify/status flow", readme_text)
+        self.assertIn("documented temp-target production loop", readme_text)
+        self.assertIn("runner-local `CODEX_TARGET_OVERRIDE` path", readme_text)
         self.assertIn("Git Bash on Windows", readme_text)
         self.assertIn("do not call tools directly", readme_text.lower())
         self.assertIn("local-home-agent-overrides.json", readme_text)
@@ -659,6 +674,37 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("delegates to `sync-skills.sh`", readme_text)
         self.assertIn("Git Bash on Windows", readme_text)
         self.assertIn("Install, Update, Status", readme_text)
+
+    def test_contributing_and_security_docs_cover_workflow_and_reporting(self) -> None:
+        contributing_text = read_text(REPOSITORY_ROOT / "CONTRIBUTING.md")
+        security_text = read_text(REPOSITORY_ROOT / "SECURITY.md")
+
+        self.assertIn("working brief", contributing_text)
+        self.assertIn("top-level plan item", contributing_text)
+        self.assertIn("small validated batches", contributing_text)
+        self.assertIn("temporary Codex home target", contributing_text)
+        self.assertIn("CODEX_TARGET_OVERRIDE", contributing_text)
+        self.assertIn("./sync-skills.sh validate", contributing_text)
+        self.assertIn("./sync-skills.sh verify", contributing_text)
+        self.assertIn("./sync-skills.ps1 validate", contributing_text)
+        self.assertIn("./sync-skills.ps1 verify", contributing_text)
+        self.assertIn("live `~/.codex` target only as an intentional final check", contributing_text)
+        self.assertIn("Do not open a public issue", security_text)
+        self.assertIn("private vulnerability reporting", security_text)
+        self.assertIn("root cause", security_text)
+        self.assertIn("security-audit-status.md", security_text)
+
+    def test_ci_workflow_proves_temp_target_production_loop(self) -> None:
+        workflow_text = read_text(REPOSITORY_ROOT / ".github" / "workflows" / "validate.yml")
+
+        self.assertIn('CODEX_TARGET_OVERRIDE="$temporary_codex_home"', workflow_text)
+        self.assertIn("bash ./sync-skills.sh install", workflow_text)
+        self.assertIn("bash ./sync-skills.sh verify", workflow_text)
+        self.assertIn("bash ./sync-skills.sh status", workflow_text)
+        self.assertIn('$env:CODEX_TARGET_OVERRIDE = Join-Path $env:RUNNER_TEMP "codex-home"', workflow_text)
+        self.assertIn("./sync-skills.ps1 install", workflow_text)
+        self.assertIn("./sync-skills.ps1 verify", workflow_text)
+        self.assertIn("./sync-skills.ps1 status", workflow_text)
 
     def test_mobile_guidance_uses_keystore_for_android(self) -> None:
         mobile_text = read_text(REPOSITORY_ROOT / "mobile-development-life-cycle" / "SKILL.md")
@@ -2935,7 +2981,7 @@ Notes:
             completed_process = run_bash(command)
             self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
             normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
-            self.assertIn("Circular imports: pass (repo-scoped cycle gate)", normalized_output)
+            self.assertIn("Circular imports: skipped (Import Linter unavailable; repo-scoped cycle fallback passed)", normalized_output)
             self.assertIn("Import safety: pass", normalized_output)
             self.assertEqual(str(fake_repository_path), observed_working_directory_path.read_text(encoding="utf-8").strip())
 
@@ -2950,12 +2996,12 @@ Notes:
             completed_process = run_bash(command)
             self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
             normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
-            self.assertIn("Black: pass (repo-scoped formatter gate)", normalized_output)
-            self.assertIn("Ruff: pass (repo-scoped lint gate)", normalized_output)
-            self.assertIn("MyPy: pass (repo-scoped type gate)", normalized_output)
-            self.assertIn("Circular imports: pass (repo-scoped cycle gate)", normalized_output)
-            self.assertIn("Import safety: pass (repo-scoped boundary gate)", normalized_output)
-            self.assertIn("Prettier: pass (repo-scoped asset gate)", normalized_output)
+            self.assertIn("Black: skipped (Black unavailable; repo-scoped formatter fallback passed)", normalized_output)
+            self.assertIn("Ruff: skipped (Ruff unavailable; repo-scoped lint fallback passed)", normalized_output)
+            self.assertIn("MyPy: skipped (MyPy unavailable; repo-scoped type fallback passed)", normalized_output)
+            self.assertIn("Circular imports: skipped (Import Linter unavailable; repo-scoped cycle fallback passed)", normalized_output)
+            self.assertIn("Import safety: skipped (Import Linter unavailable; repo-scoped boundary fallback passed)", normalized_output)
+            self.assertIn("Prettier: skipped (Prettier unavailable; repo-scoped asset fallback passed)", normalized_output)
 
     def test_reviewer_quality_gates_report_circular_imports_separately(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -3097,12 +3143,26 @@ Notes:
             self.assertEqual(1, completed_process.returncode)
             self.assertIn("cross-scope import", completed_process.stderr)
 
-    def test_fast_install_validation_skips_contract_tests_by_default(self) -> None:
+    def test_install_validation_runs_full_mode_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                'validate_all() { printf "full-validation-ran\n" >&2; return 0; }; '
+                'validate_sync_operation_prerequisites'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("full-validation-ran", normalized_output)
+
+    def test_fast_install_validation_skips_contract_tests_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
             command = (
                 f'source "{sourced_script_path}"; '
                 f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                'CODEX_SYNC_VALIDATION_MODE=fast; '
                 'validate_codex_repo_docs() { printf "docs-ran\n" >&2; return 0; }; '
                 'collect_failed_skill_names_parallel() { return 0; }; '
                 'run_repo_contract_tests() { printf "contract-tests-ran\n" >&2; return 1; }; '
@@ -3114,20 +3174,6 @@ Notes:
             self.assertIn("[run] validate docs", normalized_output)
             self.assertNotIn("contract-tests-ran", normalized_output)
             self.assertIn("Fast install/update validation passed", normalized_output)
-
-    def test_fast_install_validation_can_delegate_to_full_mode(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
-            command = (
-                f'source "{sourced_script_path}"; '
-                'CODEX_SYNC_VALIDATION_MODE=full; '
-                'validate_all() { printf "full-validation-ran\n" >&2; return 0; }; '
-                'validate_sync_operation_prerequisites'
-            )
-            completed_process = run_bash(command)
-            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
-            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
-            self.assertIn("full-validation-ran", normalized_output)
 
     def test_sync_skill_to_codex_skips_redundant_validation_after_prerequisite_pass(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

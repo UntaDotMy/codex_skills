@@ -1,6 +1,33 @@
 # Codex Skills Repository
 
-This repository is a Codex-first skill pack for OpenAI Codex CLI. It ships specialist skills, repo-wide orchestration guidance, sync tooling for `~/.codex`, and a memory-status workflow that turns saved artifacts into human-style learning reports.
+[![Validate](https://github.com/UntaDotMy/codex_skills/actions/workflows/validate.yml/badge.svg)](https://github.com/UntaDotMy/codex_skills/actions/workflows/validate.yml)
+
+This repository is the maintained Codex skill pack used for real delivery work in OpenAI Codex CLI. It ships specialist skills, repo-wide orchestration guidance, sync tooling for `~/.codex`, and a memory-status workflow that turns saved artifacts into human-style learning reports.
+
+## Why This Repo Exists
+
+- make Codex delivery work repeatable instead of prompt-by-prompt improvisation
+- keep planning, research, implementation, review, memory, and install behavior aligned across the source repo and the live `~/.codex` install
+- turn the safest path into the default path: build a working brief, research current facts, validate before syncing, verify after install, and keep iterating until the request is actually done
+
+## What This Repo Covers
+
+- working briefs, user stories, named-scope delivery, and one top-level plan item per explicit user task
+- specialist skill lanes for backend, cloud, mobile, web, UI, UX, QA, security, git, reviewer, and memory maintenance
+- completion discipline that keeps going when validation finds another in-scope issue instead of treating a status check as a stop signal
+- memory layers, write-ahead session state, research cache reuse, reward or penalty learning, and compact rollout reporting
+- code review and validation doctrine covering formatter, lint, type, circular-import, import-safety, asset, contract, completion, and required-agent checks
+- UI and UX delivery guidance that keeps visual quality, user flows, recovery states, and brownfield fidelity aligned
+- cross-platform install, update, status, validate, verify, and uninstall flows for macOS, Linux, and Windows
+
+## Architecture At A Glance
+
+1. The source repo owns the skill docs, prompt configs, validators, tests, and root guidance.
+2. `sync-skills.sh` and `sync-skills.ps1` are the managed entrypoints for install, update, status, validate, verify, and remove flows.
+3. Install syncs the repo-managed surfaces into `~/.codex`, generates home-agent TOMLs and agent profiles, and keeps live memory wiring aligned.
+4. The memory-status toolchain provides scoped memory, research-cache, completion-gate, agent-registry, and loop-guard helpers for long-running work.
+5. Validation is layered: docs validation, skill validation, reviewer quality gates, completion smoke, required-agent smoke, contract tests, install refresh, and checksum verification.
+6. The longer-term native-binary direction is documented in [native-cli-migration-plan.md](docs/native-cli-migration-plan.md).
 
 ## Quick Start
 
@@ -9,6 +36,8 @@ This repository is a Codex-first skill pack for OpenAI Codex CLI. It ships speci
 You do not need to manually clone the whole repo first anymore.
 
 Download just the existing entry script for your platform and run it. If the full repo is not present yet, the script now stages a fresh temporary clone for that run, refreshes the local entry script when a newer `sync-skills` file is available, restarts into the refreshed file, and then continues with the normal install, menu, update, and status flows. The temporary staged repo is deleted after the run unless you explicitly set `CODEX_SKILLS_REPOSITORY_PATH`.
+
+By default, `install` and `update` now run the full repo validation path before they mutate the live Codex home. If a contributor wants the lighter dev loop, `CODEX_SYNC_VALIDATION_MODE=fast` is still available as an explicit opt-in.
 
 #### macOS and Linux
 
@@ -72,14 +101,14 @@ Required flow:
    - macOS/Linux: download `sync-skills.sh`, then run `bash ./sync-skills.sh install`
    - Windows: download `sync-skills.ps1`, then run `powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install`
 3. If the repo is already present, use the normal repo-managed `sync-skills.sh` or `sync-skills.ps1` entrypoint there.
-4. After install, run `status`.
- 5. Tell me whether repo version, installed version, memory-status-reporter wiring, skill agent profiles, explicit agent wiring, and MD5 verification all pass.
+4. After install, run `verify`, then run `status`.
+5. Tell me whether repo version, installed version, memory-status-reporter wiring, skill agent profiles, explicit agent wiring, and MD5 verification all pass.
 
 If anything fails:
 - identify the exact failing step,
 - fix only the root cause,
 - rerun the minimum necessary validation,
-- then rerun `install` and `status`.
+- then rerun `install`, `verify`, and `status`.
 ```
 
 ### Manual Install
@@ -95,6 +124,7 @@ git clone https://github.com/UntaDotMy/codex_skills.git
 cd codex_skills
 ./sync-skills.sh validate
 ./sync-skills.sh install
+./sync-skills.sh verify
 ./sync-skills.sh status
 ```
 
@@ -105,6 +135,7 @@ git clone https://github.com/UntaDotMy/codex_skills.git
 Set-Location codex_skills
 ./sync-skills.ps1 validate
 ./sync-skills.ps1 install
+./sync-skills.ps1 verify
 ./sync-skills.ps1 status
 ```
 
@@ -113,16 +144,18 @@ If your PowerShell execution policy blocks local scripts, use this fallback:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 validate
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 install
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 verify
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 ```
 
 ### Start Using It
 
-After installation, you can immediately use the manager and the simple update/status flow:
+After installation, you can immediately use the manager and the simple update/verify/status flow:
 
 ```bash
 bash ./sync-skills.sh menu
 bash ./sync-skills.sh update
+bash ./sync-skills.sh verify
 bash ./sync-skills.sh status
 ```
 
@@ -131,6 +164,7 @@ On Windows PowerShell, use the wrapper:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 menu
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 update
+powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 verify
 powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 ```
 
@@ -139,6 +173,25 @@ powershell -ExecutionPolicy Bypass -File .\sync-skills.ps1 status
 - Codex CLI with `js_repl`, `memories`, and `multi_agent` enabled
 - Python 3 for memory-report tooling and sync helpers, available as `python`, `python3`, or `py -3`
 - Git Bash on Windows for the Bash runner; `sync-skills.ps1` delegates to `sync-skills.sh` and locates common Git Bash installs for you
+
+### Validation Defaults
+
+- `install` and `update` run the full validation path by default before syncing files into `~/.codex`
+- `CODEX_SYNC_VALIDATION_MODE=fast` keeps the lighter local-dev path available when the faster loop is intentional
+- `CODEX_SYNC_VALIDATION_MODE=none` is still available for exceptional troubleshooting, but it should not be the normal path
+- `verify` remains the checksum proof step after install or update
+
+### Continuous Validation
+
+The repository also ships a GitHub Actions workflow at `.github/workflows/validate.yml` so public pushes and pull requests can prove the documented temp-target production loop across:
+
+- Ubuntu with the Bash manager
+- macOS with the Bash manager
+- Windows with the PowerShell wrapper path
+
+Each runner executes `validate`, `install`, `verify`, and `status` against a runner-local `CODEX_TARGET_OVERRIDE` path so the workflow checks repo-managed wiring without mutating a real Codex home.
+
+That CI lane is meant to complement local validation, not replace it.
 
 ### Runtime Guardrails and Memory Maintenance
 
@@ -205,6 +258,15 @@ The updater stays conservative about repo state:
 - it restarts into the refreshed manager when `sync-skills.sh` changed during that pull
 - it still syncs the current local repo state into Codex home when the repo is already ahead, diverged, dirty, or remote metadata is unavailable
 - it refreshes the external one-file launcher from the staged bootstrap repo when that launcher is writable
+
+For day-to-day use, the intended production loop is:
+
+```bash
+./sync-skills.sh validate
+./sync-skills.sh install
+./sync-skills.sh verify
+./sync-skills.sh status
+```
 
 Legacy alias: `github-update` still maps to `update`, but the primary flow is now just `update`.
 
@@ -512,6 +574,12 @@ CODEX_TARGET_OVERRIDE=/tmp/test-codex-home ./sync-skills.sh install
 3. Add `references/`.
 4. Add `agents/openai.yaml`.
 5. Validate and sync.
+
+## Repository Standards
+
+- [AGENTS.md](AGENTS.md) defines the main operating doctrine for planning, research, implementation, review, completion, and memory use.
+- [CONTRIBUTING.md](CONTRIBUTING.md) documents the expected contributor workflow for patches, validation, and documentation updates.
+- [SECURITY.md](SECURITY.md) explains how to report vulnerabilities and how security-sensitive issues should be handled.
 
 ### Modular Code Preference
 

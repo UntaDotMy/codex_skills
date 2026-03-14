@@ -1,0 +1,57 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate-unix:
+    name: Validate on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run temp-target production loop
+        run: |
+          temporary_codex_home="${RUNNER_TEMP}/codex-home"
+          mkdir -p "$temporary_codex_home"
+          CODEX_TARGET_OVERRIDE="$temporary_codex_home" bash ./sync-skills.sh validate
+          CODEX_TARGET_OVERRIDE="$temporary_codex_home" bash ./sync-skills.sh install
+          CODEX_TARGET_OVERRIDE="$temporary_codex_home" bash ./sync-skills.sh verify
+          CODEX_TARGET_OVERRIDE="$temporary_codex_home" bash ./sync-skills.sh status
+
+  validate-windows:
+    name: Validate on windows-latest
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run PowerShell temp-target production loop
+        shell: pwsh
+        run: |
+          $env:CODEX_TARGET_OVERRIDE = Join-Path $env:RUNNER_TEMP "codex-home"
+          New-Item -ItemType Directory -Force -Path $env:CODEX_TARGET_OVERRIDE | Out-Null
+          ./sync-skills.ps1 validate
+          ./sync-skills.ps1 install
+          ./sync-skills.ps1 verify
+          ./sync-skills.ps1 status

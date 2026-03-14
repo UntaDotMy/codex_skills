@@ -3049,6 +3049,10 @@ validate_codex_guidance_file() {
     fi
 
     if [[ "$(basename "$file")" == "README.md" ]]; then
+        if ! grep -qi "Why This Repo Exists" "$file" || ! grep -qi "What This Repo Covers" "$file" || ! grep -qi "Architecture At A Glance" "$file" || ! grep -qi "Validation Defaults" "$file" || ! grep -qi "Continuous Validation" "$file" || ! grep -qi "Repository Standards" "$file"; then
+            print_error "Missing repo-purpose, architecture, validation-default, CI, or standards sections in README.md"
+            return 1
+        fi
         if ! grep -qi "Research cache" "$file" || ! grep -qi "Reinforcement memory" "$file" || ! grep -qi "rewarded patterns" "$file" || ! grep -qi "github-update" "$file" || ! grep -qi "skip redundant live research" "$file"; then
             print_error "Missing research-cache, GitHub update, or reinforcement-memory workflow in README.md"
             return 1
@@ -3057,10 +3061,10 @@ validate_codex_guidance_file() {
             print_error "Missing scoped-memory or research-cache helper workflow in README.md"
             return 1
         fi
-       if ! grep -qi "sync-skills.ps1" "$file" || ! grep -Eqi "delegates to .*sync-skills\.sh" "$file" || ! grep -qi "Git Bash on Windows" "$file" || ! grep -qi "runtime-guardrails-and-memory-protocols.md" "$file" || ! grep -qi "do not stay solo by default" "$file" || ! grep -qi "top-level plan item per explicit user task" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "memory writer" "$file"; then
-           print_error "Missing Windows wrapper, runtime-guardrails, local-override, or memory-writer documentation in README.md"
-           return 1
-       fi
+       if ! grep -qi "sync-skills.ps1" "$file" || ! grep -Eqi "delegates to .*sync-skills\.sh" "$file" || ! grep -qi "Git Bash on Windows" "$file" || ! grep -qi "runtime-guardrails-and-memory-protocols.md" "$file" || ! grep -qi "do not stay solo by default" "$file" || ! grep -qi "top-level plan item per explicit user task" "$file" || ! grep -qi "local-home-agent-overrides.json" "$file" || ! grep -qi "memory writer" "$file" || ! grep -qi "runner-local" "$file" || ! grep -qi "CODEX_TARGET_OVERRIDE" "$file" || ! grep -qi "run `verify`" "$file" || ! grep -qi "run `status`" "$file"; then
+            print_error "Missing Windows wrapper, runtime-guardrails, local-override, or memory-writer documentation in README.md"
+            return 1
+        fi
         if ! grep -qi "agent-profiles/\*\.toml" "$file" || ! grep -qi "skill agent profiles: 12/12" "$file" || ! grep -Eqi "does not ship root-level .*agents/.*agent-profiles/ directories" "$file" || ! grep -Eqi "generated home surfaces are created in .*~/.codex.* during install or update" "$file"; then
             print_error "Missing generated-home surface or skill-agent-profile mirror documentation in README.md"
             return 1
@@ -3074,6 +3078,20 @@ validate_codex_guidance_file() {
             return 1
         fi
    fi
+
+    if [[ "$(basename "$file")" == "CONTRIBUTING.md" ]]; then
+        if ! grep -qi "working brief" "$file" || ! grep -qi "top-level plan item" "$file" || ! grep -qi "small validated batches" "$file" || ! grep -qi "temporary Codex home target" "$file" || ! grep -qi "CODEX_TARGET_OVERRIDE" "$file" || ! grep -qi "sync-skills.ps1" "$file" || ! grep -qi "validate" "$file" || ! grep -qi "verify" "$file" || ! grep -qi "intentional final check" "$file"; then
+            print_error "Missing workflow, validation, or planning guidance in CONTRIBUTING.md"
+            return 1
+        fi
+    fi
+
+    if [[ "$(basename "$file")" == "SECURITY.md" ]]; then
+        if ! grep -qi "Do not open a public issue" "$file" || ! grep -qi "private vulnerability reporting" "$file" || ! grep -qi "root cause" "$file" || ! grep -qi "security-audit-status.md" "$file"; then
+            print_error "Missing private-reporting, root-cause, or validation-posture guidance in SECURITY.md"
+            return 1
+        fi
+    fi
 
     if [[ "$(basename "$file")" == "00-skill-routing-and-escalation.md" ]]; then
         if ! grep -qi "Reuse Fresh Research First" "$file" || ! grep -qi "Fix The Next Bug Too" "$file" || ! grep -qi "Requirement Reconciliation Before Close" "$file" || ! grep -qi "Status Requests Do Not End The Job" "$file" || ! grep -qi "Write Corrections Before Responding" "$file" || ! grep -qi "Resolve workspace-scoped memory first" "$file" || ! grep -qi "agent-instance lane" "$file" || ! grep -qi "Use Solo Mode Deliberately" "$file" || ! grep -qi "Planning Defaults" "$file" || ! grep -qi "memory-status-reporter" "$file" || ! grep -qi "report what changed" "$file"; then
@@ -3118,6 +3136,8 @@ validate_codex_repo_docs() {
         "$CODEX_SOURCE/AGENTS.md"
         "$CODEX_SOURCE/00-skill-routing-and-escalation.md"
         "$CODEX_SOURCE/README.md"
+        "$CODEX_SOURCE/CONTRIBUTING.md"
+        "$CODEX_SOURCE/SECURITY.md"
         "$CODEX_SOURCE/VALIDATION_REPORT.md"
     )
     local codex_skill_count
@@ -3283,9 +3303,9 @@ run_reviewer_quality_gates() {
             gate_failures=1
         fi
     elif run_repo_scoped_quality_gate formatter >/dev/null; then
-        printf 'Black: pass (repo-scoped formatter gate)\n'
+        printf 'Black: skipped (Black unavailable; repo-scoped formatter fallback passed)\n'
     else
-        printf 'Black: fail (repo-scoped formatter gate)\n' >&2
+        printf 'Black: fail (Black unavailable; repo-scoped formatter fallback failed)\n' >&2
         gate_failures=1
     fi
 
@@ -3297,9 +3317,9 @@ run_reviewer_quality_gates() {
             gate_failures=1
         fi
     elif run_repo_scoped_quality_gate lint >/dev/null; then
-        printf 'Ruff: pass (repo-scoped lint gate)\n'
+        printf 'Ruff: skipped (Ruff unavailable; repo-scoped lint fallback passed)\n'
     else
-        printf 'Ruff: fail (repo-scoped lint gate)\n' >&2
+        printf 'Ruff: fail (Ruff unavailable; repo-scoped lint fallback failed)\n' >&2
         gate_failures=1
     fi
 
@@ -3311,9 +3331,9 @@ run_reviewer_quality_gates() {
             gate_failures=1
         fi
     elif run_repo_scoped_quality_gate types >/dev/null; then
-        printf 'MyPy: pass (repo-scoped type gate)\n'
+        printf 'MyPy: skipped (MyPy unavailable; repo-scoped type fallback passed)\n'
     else
-        printf 'MyPy: fail (repo-scoped type gate)\n' >&2
+        printf 'MyPy: fail (MyPy unavailable; repo-scoped type fallback failed)\n' >&2
         gate_failures=1
     fi
 
@@ -3325,9 +3345,9 @@ run_reviewer_quality_gates() {
             gate_failures=1
         fi
     elif run_repo_scoped_quality_gate circular-imports >/dev/null; then
-        printf 'Circular imports: pass (repo-scoped cycle gate)\n'
+        printf 'Circular imports: skipped (Import Linter unavailable; repo-scoped cycle fallback passed)\n'
     else
-        printf 'Circular imports: fail (repo-scoped cycle gate)\n' >&2
+        printf 'Circular imports: fail (Import Linter unavailable; repo-scoped cycle fallback failed)\n' >&2
         gate_failures=1
     fi
 
@@ -3339,9 +3359,9 @@ run_reviewer_quality_gates() {
             gate_failures=1
         fi
     elif run_repo_scoped_quality_gate import-safety >/dev/null; then
-        printf 'Import safety: pass (repo-scoped boundary gate)\n'
+        printf 'Import safety: skipped (Import Linter unavailable; repo-scoped boundary fallback passed)\n'
     else
-        printf 'Import safety: fail (repo-scoped boundary gate)\n' >&2
+        printf 'Import safety: fail (Import Linter unavailable; repo-scoped boundary fallback failed)\n' >&2
         gate_failures=1
     fi
 
@@ -3360,9 +3380,9 @@ run_reviewer_quality_gates() {
             gate_failures=1
         fi
     elif run_repo_scoped_quality_gate assets >/dev/null; then
-        printf 'Prettier: pass (repo-scoped asset gate)\n'
+        printf 'Prettier: skipped (Prettier unavailable; repo-scoped asset fallback passed)\n'
     else
-        printf 'Prettier: fail (repo-scoped asset gate)\n' >&2
+        printf 'Prettier: fail (Prettier unavailable; repo-scoped asset fallback failed)\n' >&2
         gate_failures=1
     fi
 
@@ -4220,7 +4240,7 @@ validate_all() {
 }
 
 validate_sync_operation_prerequisites() {
-    local validation_mode="${CODEX_SYNC_VALIDATION_MODE:-fast}"
+    local validation_mode="${CODEX_SYNC_VALIDATION_MODE:-full}"
     local failed=0
     local failed_skill_name
 
@@ -5414,7 +5434,7 @@ show_usage() {
     echo "  CODEX_SKILLS_REPOSITORY_PATH=/path/to/codex_skills  Use an explicit repo path instead of a fresh temporary bootstrap clone"
     echo "  CODEX_SKILLS_REPOSITORY_URL=https://github.com/owner/repo.git  Override the bootstrap clone source"
     echo "  CODEX_SKILLS_REPOSITORY_BRANCH=main  Override the bootstrap clone branch"
-    echo "  CODEX_SYNC_VALIDATION_MODE=fast|full|none  Choose install/update validation depth (default: fast)"
+    echo "  CODEX_SYNC_VALIDATION_MODE=fast|full|none  Choose install/update validation depth (default: full)"
     echo "  CODEX_SYNC_POST_SYNC_VERIFICATION_MODE=fast|full|none  Choose install/update post-sync verification depth (default: fast)"
 }
 
