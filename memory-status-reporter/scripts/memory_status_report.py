@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+sys.dont_write_bytecode = True
 
 from memory_store import (
     collect_workspace_rollout_matches,

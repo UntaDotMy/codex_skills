@@ -3087,8 +3087,12 @@ validate_codex_guidance_file() {
     fi
 
     if [[ "$(basename "$file")" == "VALIDATION_REPORT.md" ]]; then
-        if ! grep -qi "github-update" "$file" || ! grep -qi "cache-first research gate" "$file" || ! grep -qi "keep-iterating completion rule" "$file"; then
-            print_error "Missing GitHub update, cache-first, or autonomy hardening evidence in VALIDATION_REPORT.md"
+        if ! grep -qi "github-update" "$file" || ! grep -qi "cache-first research gate" "$file" || ! grep -qi "keep-iterating completion rule" "$file" || ! grep -qi "Evidence Snapshot (Non-Score)" "$file" || ! grep -qi "does not publish a numeric readiness score" "$file"; then
+            print_error "Missing GitHub update, cache-first, autonomy, or non-score evidence language in VALIDATION_REPORT.md"
+            return 1
+        fi
+        if grep -Eq "Overall non-speed readiness score|[0-9]+\.[0-9]+/10" "$file"; then
+            print_error "VALIDATION_REPORT.md must not publish numeric readiness scores"
             return 1
         fi
     fi
@@ -3207,6 +3211,286 @@ run_repo_contract_tests() {
     fi
 
     run_python "$CODEX_SOURCE/tests/parallel_contract_test_runner.py"
+}
+
+repo_has_black_configuration() {
+    [[ -f "$CODEX_SOURCE/black.toml" ]] || [[ -f "$CODEX_SOURCE/.black.toml" ]] || {
+        [[ -f "$CODEX_SOURCE/pyproject.toml" ]] && grep -Eqi '^\[tool\.black\]' "$CODEX_SOURCE/pyproject.toml"
+    }
+}
+
+repo_has_ruff_configuration() {
+    [[ -f "$CODEX_SOURCE/ruff.toml" ]] || [[ -f "$CODEX_SOURCE/.ruff.toml" ]] || {
+        [[ -f "$CODEX_SOURCE/pyproject.toml" ]] && grep -Eqi '^\[tool\.ruff' "$CODEX_SOURCE/pyproject.toml"
+    }
+}
+
+repo_has_mypy_configuration() {
+    [[ -f "$CODEX_SOURCE/mypy.ini" ]] || [[ -f "$CODEX_SOURCE/.mypy.ini" ]] || [[ -f "$CODEX_SOURCE/setup.cfg" ]] || {
+        [[ -f "$CODEX_SOURCE/pyproject.toml" ]] && grep -Eqi '^\[tool\.mypy\]' "$CODEX_SOURCE/pyproject.toml"
+    }
+}
+
+repo_has_import_linter_configuration() {
+    [[ -f "$CODEX_SOURCE/.importlinter" ]] || [[ -d "$CODEX_SOURCE/importlinter_contracts" ]]
+}
+
+repo_has_circular_import_configuration() {
+    [[ -f "$CODEX_SOURCE/.importlinter" ]] && grep -Eqi 'acyclic|independence|circular|cycle' "$CODEX_SOURCE/.importlinter"
+}
+
+repo_has_prettier_configuration() {
+    [[ -f "$CODEX_SOURCE/.prettierrc" ]] || [[ -f "$CODEX_SOURCE/.prettierrc.json" ]] || [[ -f "$CODEX_SOURCE/.prettierrc.yml" ]] || [[ -f "$CODEX_SOURCE/.prettierrc.yaml" ]] || [[ -f "$CODEX_SOURCE/prettier.config.js" ]] || [[ -f "$CODEX_SOURCE/prettier.config.cjs" ]] || {
+        [[ -f "$CODEX_SOURCE/package.json" ]] && grep -Eqi '"prettier"|[Pp]rettier' "$CODEX_SOURCE/package.json"
+    }
+}
+
+python_module_is_available() {
+    local module_name=$1
+
+    run_python - "$module_name" <<'PY' >/dev/null 2>&1
+import importlib.util
+import sys
+
+module_name = sys.argv[1]
+raise SystemExit(0 if importlib.util.find_spec(module_name) else 1)
+PY
+}
+
+run_repo_scoped_import_linter() {
+    (
+        cd "$CODEX_SOURCE" || exit 1
+        lint-imports
+    )
+}
+
+run_repo_scoped_quality_gate() {
+    ensure_python_launcher || return 1
+    run_python "$CODEX_SOURCE/tools/repo_quality_gate.py" "$1" --root "$CODEX_SOURCE"
+}
+
+run_reviewer_quality_gates() {
+    ensure_python_launcher || return 1
+    local gate_failures=0
+    local prettier_target
+    local prettier_targets=()
+
+    if repo_has_black_configuration && python_module_is_available black; then
+        if run_python -m black --check "$CODEX_SOURCE"; then
+            printf 'Black: pass\n'
+        else
+            printf 'Black: fail\n' >&2
+            gate_failures=1
+        fi
+    elif run_repo_scoped_quality_gate formatter >/dev/null; then
+        printf 'Black: pass (repo-scoped formatter gate)\n'
+    else
+        printf 'Black: fail (repo-scoped formatter gate)\n' >&2
+        gate_failures=1
+    fi
+
+    if repo_has_ruff_configuration && python_module_is_available ruff; then
+        if run_python -m ruff check "$CODEX_SOURCE"; then
+            printf 'Ruff: pass\n'
+        else
+            printf 'Ruff: fail\n' >&2
+            gate_failures=1
+        fi
+    elif run_repo_scoped_quality_gate lint >/dev/null; then
+        printf 'Ruff: pass (repo-scoped lint gate)\n'
+    else
+        printf 'Ruff: fail (repo-scoped lint gate)\n' >&2
+        gate_failures=1
+    fi
+
+    if repo_has_mypy_configuration && python_module_is_available mypy; then
+        if run_python -m mypy "$CODEX_SOURCE"; then
+            printf 'MyPy: pass\n'
+        else
+            printf 'MyPy: fail\n' >&2
+            gate_failures=1
+        fi
+    elif run_repo_scoped_quality_gate types >/dev/null; then
+        printf 'MyPy: pass (repo-scoped type gate)\n'
+    else
+        printf 'MyPy: fail (repo-scoped type gate)\n' >&2
+        gate_failures=1
+    fi
+
+    if repo_has_circular_import_configuration && command -v lint-imports >/dev/null 2>&1; then
+        if run_repo_scoped_import_linter; then
+            printf 'Circular imports: pass\n'
+        else
+            printf 'Circular imports: fail\n' >&2
+            gate_failures=1
+        fi
+    elif run_repo_scoped_quality_gate circular-imports >/dev/null; then
+        printf 'Circular imports: pass (repo-scoped cycle gate)\n'
+    else
+        printf 'Circular imports: fail (repo-scoped cycle gate)\n' >&2
+        gate_failures=1
+    fi
+
+    if repo_has_import_linter_configuration && command -v lint-imports >/dev/null 2>&1; then
+        if run_repo_scoped_import_linter; then
+            printf 'Import safety: pass\n'
+        else
+            printf 'Import safety: fail\n' >&2
+            gate_failures=1
+        fi
+    elif run_repo_scoped_quality_gate import-safety >/dev/null; then
+        printf 'Import safety: pass (repo-scoped boundary gate)\n'
+    else
+        printf 'Import safety: fail (repo-scoped boundary gate)\n' >&2
+        gate_failures=1
+    fi
+
+    if repo_has_prettier_configuration && command -v prettier >/dev/null 2>&1; then
+        while IFS= read -r prettier_target; do
+            [[ -n "$prettier_target" ]] || continue
+            prettier_targets+=("$CODEX_SOURCE/$prettier_target")
+        done < <(git -C "$CODEX_SOURCE" ls-files '*.md' '*.json' '*.yaml' '*.yml' 2>/dev/null || true)
+
+        if [[ ${#prettier_targets[@]} -eq 0 ]]; then
+            printf 'Prettier: pass (no tracked markdown or data files required external formatting)\n'
+        elif prettier --check "${prettier_targets[@]}" >/dev/null 2>&1; then
+            printf 'Prettier: pass\n'
+        else
+            printf 'Prettier: fail\n' >&2
+            gate_failures=1
+        fi
+    elif run_repo_scoped_quality_gate assets >/dev/null; then
+        printf 'Prettier: pass (repo-scoped asset gate)\n'
+    else
+        printf 'Prettier: fail (repo-scoped asset gate)\n' >&2
+        gate_failures=1
+    fi
+
+    [[ $gate_failures -eq 0 ]]
+}
+
+run_validate_completion_gate_smoke() {
+    ensure_python_launcher || return 1
+    local temporary_root
+    local temporary_workspace
+    local temporary_memory_base
+    local script_path="$CODEX_SOURCE/memory-status-reporter/scripts/completion_gate.py"
+    local -a scope_arguments
+
+    temporary_root="$(mktemp -d)" || return 1
+    temporary_workspace="$temporary_root/workspace"
+    temporary_memory_base="$temporary_root/memory-base"
+    mkdir -p "$temporary_workspace" "$temporary_memory_base"
+    scope_arguments=(
+        --memory-base "$temporary_memory_base"
+        --workspace-root "$temporary_workspace"
+        --workstream-key "validate-smoke"
+        --agent-instance "sync-skills-validate"
+    )
+
+    if run_python "$script_path" check "${scope_arguments[@]}" --require-closure-ready >/dev/null 2>&1; then
+        rm -rf "$temporary_root"
+        print_error "Completion gate smoke unexpectedly reported closure ready before any requirements were recorded."
+        return 1
+    fi
+
+    if ! run_python "$script_path" record-requirement \
+        "${scope_arguments[@]}" \
+        --requirement-id "validate-docs" \
+        --text "Validate the repo docs." \
+        --status "in_progress" \
+        --evidence "Started validate smoke." >/dev/null; then
+        rm -rf "$temporary_root"
+        return 1
+    fi
+
+    if run_python "$script_path" check "${scope_arguments[@]}" --require-closure-ready >/dev/null 2>&1; then
+        rm -rf "$temporary_root"
+        print_error "Completion gate smoke unexpectedly reported closure ready while a requirement was still in progress."
+        return 1
+    fi
+
+    if ! run_python "$script_path" record-requirement \
+        "${scope_arguments[@]}" \
+        --requirement-id "validate-docs" \
+        --text "Validate the repo docs." \
+        --status "done" \
+        --evidence "Validate smoke completed." >/dev/null; then
+        rm -rf "$temporary_root"
+        return 1
+    fi
+
+    if ! run_python "$script_path" check "${scope_arguments[@]}" --require-closure-ready >/dev/null; then
+        rm -rf "$temporary_root"
+        print_error "Completion gate smoke failed to report closure ready after the only tracked requirement was done."
+        return 1
+    fi
+
+    printf 'Completion gate: pass\n'
+    rm -rf "$temporary_root"
+    return 0
+}
+
+run_validate_required_agent_completion_smoke() {
+    ensure_python_launcher || return 1
+    local temporary_root
+    local temporary_workspace
+    local temporary_memory_base
+    local script_path="$CODEX_SOURCE/memory-status-reporter/scripts/agent_registry.py"
+    local -a scope_arguments
+
+    temporary_root="$(mktemp -d)" || return 1
+    temporary_workspace="$temporary_root/workspace"
+    temporary_memory_base="$temporary_root/memory-base"
+    mkdir -p "$temporary_workspace" "$temporary_memory_base"
+    scope_arguments=(
+        --memory-base "$temporary_memory_base"
+        --workspace-root "$temporary_workspace"
+        --workstream-key "validate-required-agent-smoke"
+        --agent-instance "sync-skills-validate"
+    )
+
+    if run_python "$script_path" check-required-completion "${scope_arguments[@]}" --require-terminal >/dev/null 2>&1; then
+        rm -rf "$temporary_root"
+        print_error "Required-agent smoke unexpectedly reported closure ready before any required lanes were registered."
+        return 1
+    fi
+
+    if ! run_python "$script_path" register \
+        "${scope_arguments[@]}" \
+        --agent-id "reviewer-validate" \
+        --agent-role "reviewer" \
+        --status "running" \
+        --purpose "validate-smoke" \
+        --required >/dev/null; then
+        rm -rf "$temporary_root"
+        return 1
+    fi
+
+    if run_python "$script_path" check-required-completion "${scope_arguments[@]}" --require-terminal >/dev/null 2>&1; then
+        rm -rf "$temporary_root"
+        print_error "Required-agent smoke unexpectedly reported closure ready while a required lane was still running."
+        return 1
+    fi
+
+    if ! run_python "$script_path" set-status \
+        "${scope_arguments[@]}" \
+        --agent-id "reviewer-validate" \
+        --status "completed" \
+        --note "validate smoke completed" >/dev/null; then
+        rm -rf "$temporary_root"
+        return 1
+    fi
+
+    if ! run_python "$script_path" check-required-completion "${scope_arguments[@]}" --require-terminal >/dev/null; then
+        rm -rf "$temporary_root"
+        print_error "Required-agent smoke failed to report closure ready after the required lane reached a terminal status."
+        return 1
+    fi
+
+    printf 'Required agents: pass\n'
+    rm -rf "$temporary_root"
+    return 0
 }
 
 validate_should_skip_contract_tests() {
@@ -3916,6 +4200,10 @@ validate_all() {
         ((failed+=1))
     done < <(collect_failed_skill_names_parallel)
 
+    run_with_spinner "reviewer quality gates" run_reviewer_quality_gates || ((failed+=1))
+    run_with_spinner "completion gate smoke" run_validate_completion_gate_smoke || ((failed+=1))
+    run_with_spinner "required agent completion smoke" run_validate_required_agent_completion_smoke || ((failed+=1))
+
     if validate_should_skip_contract_tests; then
         print_info "Skipping nested contract suite because CODEX_SKIP_VALIDATE_CONTRACT_TESTS=1"
     else
@@ -4192,6 +4480,7 @@ collect_skill_pack_status_details() {
     local skill_name
     local agent_profile_name
     local skill_refresh_reason
+    local changed_skill_scan_output
 
     reset_skill_pack_status_details
 
@@ -4209,6 +4498,23 @@ collect_skill_pack_status_details() {
     SKILL_PACK_STATUS_SKILL_SCAN_SKIPPED="true"
     if skill_refresh_reason="$(resolve_skill_pack_status_refresh_reason)"; then
         SKILL_PACK_STATUS_SKILL_REFRESH_REASON="$skill_refresh_reason"
+    fi
+
+    if [[ "$SKILL_PACK_STATUS_SKILL_REFRESH_REASON" == "local repo changes present" ]]; then
+        if changed_skill_scan_output="$(collect_changed_skills_parallel)"; then
+            SKILL_PACK_STATUS_SKILL_SCAN_SKIPPED="false"
+            while IFS= read -r skill_name; do
+                [[ -n "$skill_name" ]] || continue
+                SKILL_PACK_STATUS_CHANGED_SKILLS+=("$skill_name")
+            done <<< "$changed_skill_scan_output"
+
+            if [[ ${#SKILL_PACK_STATUS_CHANGED_SKILLS[@]} -eq 0 ]]; then
+                SKILL_PACK_STATUS_SKILL_REFRESH_REASON=""
+            fi
+        else
+            SKILL_PACK_STATUS_SKILL_SCAN_SKIPPED="true"
+            SKILL_PACK_STATUS_SKILL_REFRESH_REASON="local repo changes present; managed-skill diff failed"
+        fi
     fi
 
     while IFS= read -r agent_profile_name; do
@@ -4398,6 +4704,8 @@ show_checksum_status() {
         echo "  skill checksum status: quick status detected ${SKILL_PACK_STATUS_SKILL_REFRESH_REASON}; run install or verify for a deep content refresh check"
     elif [[ "$SKILL_PACK_STATUS_SKILL_SCAN_SKIPPED" == "true" ]]; then
         echo "  skill checksum status: quick status skipped deep content scan; run verify for byte-level skill content checks"
+    elif [[ ${#SKILL_PACK_STATUS_CHANGED_SKILLS[@]} -eq 0 ]]; then
+        echo "  skill checksum status: all installed skills match source"
     else
         echo "  skill checksum status: drift in ${SKILL_PACK_STATUS_CHANGED_SKILLS[*]}"
     fi
@@ -4885,7 +5193,7 @@ summarize_skill_pack_update_status() {
         return 0
     fi
 
-    if [[ -z "$SKILL_PACK_STATUS_SKILL_REFRESH_REASON" ]] && [[ "$SKILL_PACK_STATUS_ROOT_GUIDANCE_CHANGED" == "false" ]] && [[ "$SKILL_PACK_STATUS_CONFIG_WIRING_REFRESH" == "false" ]] && [[ ${#SKILL_PACK_STATUS_REMOVED_SKILLS[@]} -eq 0 ]] && [[ ${#SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES[@]} -eq 0 ]] && [[ ${#SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES[@]} -eq 0 ]]; then
+    if [[ -z "$SKILL_PACK_STATUS_SKILL_REFRESH_REASON" ]] && [[ "$SKILL_PACK_STATUS_ROOT_GUIDANCE_CHANGED" == "false" ]] && [[ "$SKILL_PACK_STATUS_CONFIG_WIRING_REFRESH" == "false" ]] && [[ ${#SKILL_PACK_STATUS_CHANGED_SKILLS[@]} -eq 0 ]] && [[ ${#SKILL_PACK_STATUS_REMOVED_SKILLS[@]} -eq 0 ]] && [[ ${#SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES[@]} -eq 0 ]] && [[ ${#SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES[@]} -eq 0 ]]; then
         printf 'up to date\n'
         return 0
     fi
@@ -4896,6 +5204,8 @@ summarize_skill_pack_update_status() {
 
     if [[ -n "$SKILL_PACK_STATUS_SKILL_REFRESH_REASON" ]]; then
         detail_parts+=("$SKILL_PACK_STATUS_SKILL_REFRESH_REASON")
+    elif [[ ${#SKILL_PACK_STATUS_CHANGED_SKILLS[@]} -gt 0 ]]; then
+        detail_parts+=("${#SKILL_PACK_STATUS_CHANGED_SKILLS[@]} skill change(s)")
     fi
 
     if [[ ${#SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES[@]} -gt 0 ]]; then

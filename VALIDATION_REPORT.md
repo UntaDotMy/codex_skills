@@ -1,7 +1,7 @@
 # Skills Validation Report
 
-**Date**: 2026-03-13  
-**Scope**: Codex-only audit of skill inventory, sync logic, managed install lifecycle, repo guidance, memory-report wiring, and context-efficiency policy  
+**Date**: 2026-03-14
+**Scope**: Codex-only audit of skill inventory, sync logic, managed install lifecycle, repo guidance, memory-report wiring, and context-efficiency policy
 **Status**: ✅ PASS AFTER INSTALLER, CACHE-REUSE, AND AUTONOMY HARDENING
 
 ## Executive Summary
@@ -89,27 +89,21 @@ The repository is now aligned as a Codex-only skill pack. The sync workflow is f
 - Windows path detection now prefers `%USERPROFILE%\\.codex` and resolves it cleanly in Git Bash via `cygpath` when present
 - Windows now has a dedicated `sync-skills.ps1` wrapper so install, update, verify, and uninstall are callable from PowerShell
 
-## Quality Benchmark Snapshot (Non-Speed)
+## Evidence Snapshot (Non-Score)
 
-Readiness scoring after the current hardening pass:
+This report does not publish a numeric readiness score. It records the concrete governance and validation evidence the repo can prove today.
 
-- User-story focus and named-scope discipline: `9.8/10`
-- Small-batch patching and anti-drift execution: `9.7/10`
-- Completion honesty and partial-work prevention: `9.8/10`
-- Test and regression enforcement: `9.7/10`
-- Git workflow hygiene and clean-push safety: `9.8/10`
-- Deployment maturity and rollout doctrine: `9.8/10`
-- Security and no-hardcoding discipline: `9.7/10`
-- UI and UX quality process: `9.6/10`
-- Sub-agent handoff clarity and wait discipline policy: `9.6/10`
-- Maintainability and modular structure guidance: `9.8/10`
+- Managed profile and home-wiring parity are verified through `validate`, `status`, and `verify` instead of a subjective score summary.
+- Full validation now runs an explicit reviewer-quality-gate smoke so Black, Ruff, MyPy, Circular imports, Import safety, and Prettier are always enforced through either the native toolchain when configured or the repo-scoped fallback gates when no external toolchain is present.
+- Full validation now runs a completion-gate smoke that creates a scoped ledger, proves closure stays blocked while requirements are missing or unresolved, and requires closure-ready behavior before the step passes.
+- Contract coverage now exercises orchestration helper behavior through scoped agent-registry lookup, required-lane completion enforcement, and bounded handoff or readiness packet generation instead of relying only on phrase-parity assertions.
+- Honesty guidance now points readers to artifact-backed status files such as `docs/security-audit-status.md` when a numeric claim would overstate what the repo can currently prove.
 
-Overall non-speed readiness score: `9.8/10`
+Repo-local coverage now closes the previously reported enforcement gaps:
 
-Why this is not `10/10` yet:
-
-- Runtime-enforced waiting after child-agent timeouts is still partly governed by Codex runtime behavior rather than a repo-local executable contract.
-- UI and UX quality can be constrained by runtime capability and the underlying model, even with stronger repo doctrine and validation.
+- Reviewer quality gates no longer depend on external Black, Ruff, MyPy, Import Linter, or Prettier installs to produce executable pass or fail results because the repo ships scoped fallback validators for each lane.
+- Required sub-agent completion after timeouts is now enforced through a scoped registry closure check instead of prose-only wait doctrine.
+- This report now scopes itself to repo-owned evidence instead of trying to rate behavior that belongs to the external runtime or model.
 
 ## Validation Commands
 
@@ -148,8 +142,7 @@ Optional verification or uninstall:
 - Context-efficiency policy: documented, validator-backed, and wired into live config
 - Research reuse and autonomy policy: documented across root docs, every skill playbook, runtime prompts, and synced home guidance
 - Memory reporting: supports both full reports and compact learning snapshots
-- Validation depth: green on targeted prompt contracts, both nested `sync-skills.sh validate` smoke paths, and a full `bash ./sync-skills.sh validate` run on 2026-03-13, with shell-helper coverage for heading discovery and prompt-contract checks for autonomy, cache reuse, handoff discipline, named-scope work, and batch-validation rules
+- Validation depth: green on targeted prompt contracts, both nested `sync-skills.sh validate` smoke paths, and a full `bash ./sync-skills.sh validate` run on 2026-03-14, with shell-helper coverage for heading discovery and prompt-contract checks for autonomy, cache reuse, handoff discipline, named-scope work, and batch-validation rules
 - Standalone bootstrap resilience: one-file `sync-skills.sh` and `sync-skills.ps1` copies now refresh themselves from the managed clone when writable; the shell contract suite proves stale-launcher rewrite for Bash and includes a PowerShell execution test when `pwsh` or `powershell` is available
 - Performance evidence on 2026-03-12 in `/Users/hajilekir/Downloads/codex_skills`: serial `python3 -m unittest --durations=10 tests/test_skill_pack_contracts.py` completed in `57.25s`, parallel `python3 tests/parallel_contract_test_runner.py` completed in `28.81s` across `4` workers, and `bash ./sync-skills.sh validate` completed in `32.89s`
-- Primary remaining risk: repo policy can require waiting again after sub-agent timeouts, but the actual Codex runtime wait behavior is still governed by runtime capabilities rather than a repo-local executable harness
-- Secondary remaining risk: future live-doc drift still requires periodic audits, but the validator now checks live behavior and shell helpers in addition to wording-only contracts
+- Ongoing maintenance note: future live-doc drift still requires periodic audits, but the validator now checks live behavior and shell helpers in addition to wording-only contracts

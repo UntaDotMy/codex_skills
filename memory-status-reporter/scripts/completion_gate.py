@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from memory_store import current_timestamp, ensure_memory_scope_layout, resolve_memory_scope
+sys.dont_write_bytecode = True
+
+from memory_store import MemoryScope, current_timestamp, ensure_memory_scope_layout, resolve_memory_scope
 
 
 VALID_STATUSES = ("pending", "in_progress", "done", "blocked")
@@ -40,6 +43,11 @@ def parse_arguments() -> argparse.Namespace:
         help="Report whether the scoped workstream is actually ready to close.",
     )
     add_scope_arguments(check_parser)
+    check_parser.add_argument(
+        "--require-closure-ready",
+        action="store_true",
+        help="Exit non-zero when the scoped workstream is not yet ready to close.",
+    )
 
     list_parser = subparsers.add_parser(
         "list",
@@ -57,7 +65,7 @@ def parse_arguments() -> argparse.Namespace:
     return arguments
 
 
-def ledger_path_for_scope(scope) -> Path:
+def ledger_path_for_scope(scope: MemoryScope) -> Path:
     return scope.workstream_memory_directory / "completion-gate.json"
 
 
@@ -221,8 +229,11 @@ def main() -> None:
 
     if arguments.format == "markdown":
         print(render_markdown(payload), end="")
-        return
-    print(json.dumps(payload, indent=2) + "\n", end="")
+    else:
+        print(json.dumps(payload, indent=2) + "\n", end="")
+
+    if arguments.command == "check" and arguments.require_closure_ready and not payload["closure_ready"]:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

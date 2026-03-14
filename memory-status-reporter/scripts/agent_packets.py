@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+
 from memory_store import (
+    MemoryScope,
     current_timestamp,
     ensure_memory_scope_layout,
     resolve_memory_scope,
@@ -99,7 +103,7 @@ def save_packet(packet_directory: Path, packet_kind: str, packet_payload: dict) 
     return packet_file
 
 
-def build_common_packet_payload(arguments: argparse.Namespace, packet_kind: str, scope) -> dict:
+def build_common_packet_payload(arguments: argparse.Namespace, packet_kind: str, scope: MemoryScope) -> dict:
     return {
         "packet_kind": packet_kind,
         "created_at": current_timestamp(),
@@ -119,7 +123,7 @@ def build_common_packet_payload(arguments: argparse.Namespace, packet_kind: str,
     }
 
 
-def build_handoff_payload(arguments: argparse.Namespace, scope) -> dict:
+def build_handoff_payload(arguments: argparse.Namespace, scope: MemoryScope) -> dict:
     packet_payload = build_common_packet_payload(arguments, "handoff", scope)
     packet_payload.update(
         {
@@ -135,7 +139,7 @@ def build_handoff_payload(arguments: argparse.Namespace, scope) -> dict:
     return packet_payload
 
 
-def build_feedback_payload(arguments: argparse.Namespace, scope) -> dict:
+def build_feedback_payload(arguments: argparse.Namespace, scope: MemoryScope) -> dict:
     packet_payload = build_common_packet_payload(arguments, "feedback", scope)
     packet_payload.update(
         {
@@ -153,7 +157,7 @@ def build_feedback_payload(arguments: argparse.Namespace, scope) -> dict:
     return packet_payload
 
 
-def build_readiness_payload(arguments: argparse.Namespace, scope) -> dict:
+def build_readiness_payload(arguments: argparse.Namespace, scope: MemoryScope) -> dict:
     packet_payload = {
         "packet_kind": "readiness-check",
         "created_at": current_timestamp(),

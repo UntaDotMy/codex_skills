@@ -33,7 +33,7 @@ If a user story and request scope conflict, do one of:
 
 ## Dependency Freshness and Accuracy Gate
 
-Never write dependency versions from memory for PRDs.  
+Never write dependency versions from memory for PRDs.
 Use web-first verification and include verification date.
 
 For each dependency:
@@ -55,7 +55,7 @@ Use ecosystem-native tooling available in the target project.
 
 ## “No Harm” Delivery Standard
 
-Do not claim zero bugs.  
+Do not claim zero bugs.
 Use risk-minimizing controls:
 
 - Explicit assumptions and constraints

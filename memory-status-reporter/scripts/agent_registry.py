@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.dont_write_bytecode = True
 
 from memory_store import (
     current_timestamp,
@@ -21,6 +24,7 @@ STATUS_PRIORITY = {
     "unhealthy": 4,
 }
 DEFAULT_LOOKUP_STATUSES = ("running", "queued", "completed", "closed")
+TERMINAL_STATUSES = ("completed", "closed")
 
 
 def add_scope_arguments(parser: argparse.ArgumentParser) -> None:
@@ -43,6 +47,11 @@ def parse_arguments() -> argparse.Namespace:
     register_parser.add_argument("--status", required=True, choices=tuple(STATUS_PRIORITY.keys()))
     register_parser.add_argument("--purpose", default=None)
     register_parser.add_argument("--note", default=None)
+    register_parser.add_argument(
+        "--required",
+        action="store_true",
+        help="Mark this lane as required for the current workstream so closure checks enforce terminal completion.",
+    )
 
     lookup_parser = subparsers.add_parser("lookup", help="Find the best reusable agent for one role.")
     add_scope_arguments(lookup_parser)
@@ -81,6 +90,19 @@ def parse_arguments() -> argparse.Namespace:
     add_scope_arguments(unhealthy_parser)
     unhealthy_parser.add_argument("--agent-id", required=True)
     unhealthy_parser.add_argument("--reason", required=True)
+
+    required_parser = subparsers.add_parser(
+        "check-required-completion",
+        help="Report whether every required lane in the scoped workstream has reached a terminal status.",
+    )
+    add_scope_arguments(required_parser)
+    required_parser.add_argument("--agent-role", default=None)
+    required_parser.add_argument(
+        "--require-terminal",
+        action="store_true",
+        help="Exit non-zero when any required lane is still non-terminal or when none are recorded.",
+    )
+    required_parser.add_argument("--format", choices=("json", "markdown"), default="json")
 
     return parser.parse_args()
 
@@ -126,6 +148,7 @@ def upsert_registry_entry(
     purpose: str | None,
     note: str | None,
     agent_instance: str | None,
+    required: bool,
 ) -> dict:
     now = current_timestamp()
     sanitized_role = sanitize_agent_role(agent_role)
@@ -141,6 +164,7 @@ def upsert_registry_entry(
                     "purpose": purpose,
                     "note": note,
                     "agent_instance": sanitized_instance,
+                    "required": required,
                     "updated_at": now,
                 }
             )
@@ -155,6 +179,7 @@ def upsert_registry_entry(
         "purpose": purpose,
         "note": note,
         "agent_instance": sanitized_instance,
+        "required": required,
         "recorded_at": now,
         "updated_at": now,
     }
@@ -191,10 +216,45 @@ def render_markdown(entries: list[dict], heading: str) -> str:
         purpose_text = f" | purpose={entry['purpose']}" if entry.get("purpose") else ""
         instance_text = f" | instance={entry['agent_instance']}" if entry.get("agent_instance") else ""
         note_text = f" | note={entry['note']}" if entry.get("note") else ""
+        required_text = " | required=true" if entry.get("required") else ""
         lines.append(
-            f"- {entry['agent_role']} {entry['agent_id']} status={entry['status']}{purpose_text}{instance_text}{note_text}"
+            f"- {entry['agent_role']} {entry['agent_id']} status={entry['status']}{purpose_text}{instance_text}{note_text}{required_text}"
         )
     return "\n".join(lines) + "\n"
+
+
+def summarize_required_completion(entries: list[dict], agent_role: str | None = None) -> dict:
+    normalized_role = None if agent_role is None else sanitize_agent_role(agent_role)
+    required_entries = []
+    for entry in entries:
+        if not entry.get("required"):
+            continue
+        if normalized_role is not None and sanitize_agent_role(str(entry.get("agent_role"))) != normalized_role:
+            continue
+        required_entries.append(entry)
+
+    blocking_entries = [
+        entry
+        for entry in required_entries
+        if str(entry.get("status", "")).lower() not in TERMINAL_STATUSES
+    ]
+    closure_ready = bool(required_entries) and not blocking_entries
+    next_actions: list[str] = []
+    if not required_entries:
+        next_actions.append("No required lanes are recorded yet; register required sub-agents before claiming closure.")
+    if blocking_entries:
+        next_actions.append("Wait again or replace unhealthy required lanes until every required lane reaches completed or closed.")
+    if not next_actions:
+        next_actions.append("All required lanes are terminal. The workstream is safe to close.")
+
+    return {
+        "required_agent_count": len(required_entries),
+        "terminal_required_count": len(required_entries) - len(blocking_entries),
+        "non_terminal_required_count": len(blocking_entries),
+        "closure_ready": closure_ready,
+        "non_terminal_required_agents": sort_registry_entries(blocking_entries),
+        "next_actions": next_actions,
+    }
 
 
 def main() -> None:
@@ -219,6 +279,7 @@ def main() -> None:
             purpose=arguments.purpose,
             note=arguments.note,
             agent_instance=arguments.agent_instance,
+            required=arguments.required,
         )
         save_registry(scope.spawned_agent_registry_file, sort_registry_entries(registry_entries))
         print(json.dumps(updated_entry, indent=2) + "\n", end="")
@@ -247,6 +308,25 @@ def main() -> None:
             print(render_markdown(selected_entries, "# Agent Registry Entries"), end="")
         else:
             print(json.dumps(selected_entries, indent=2) + "\n", end="")
+        return
+
+    if arguments.command == "check-required-completion":
+        payload = {
+            "registry_path": str(scope.spawned_agent_registry_file),
+            **summarize_required_completion(registry_entries, arguments.agent_role),
+        }
+        if arguments.format == "markdown":
+            print(
+                render_markdown(
+                    payload["non_terminal_required_agents"],
+                    "# Required Agent Completion",
+                ),
+                end="",
+            )
+        else:
+            print(json.dumps(payload, indent=2) + "\n", end="")
+        if arguments.require_terminal and not payload["closure_ready"]:
+            raise SystemExit(1)
         return
 
     if arguments.command in {"set-status", "mark-unhealthy"}:

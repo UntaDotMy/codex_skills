@@ -1,12 +1,31 @@
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
+import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+sys.dont_write_bytecode = True
+
+
+def prune_runtime_noise_artifacts(directory_path: Path) -> None:
+    if not directory_path.exists():
+        return
+    for cache_directory in directory_path.rglob("__pycache__"):
+        shutil.rmtree(cache_directory, ignore_errors=True)
+    for compiled_file in directory_path.rglob("*.pyc"):
+        compiled_file.unlink(missing_ok=True)
+    for compiled_file in directory_path.rglob("*.pyo"):
+        compiled_file.unlink(missing_ok=True)
+
+
+atexit.register(prune_runtime_noise_artifacts, Path(__file__).resolve().parent)
 
 
 @dataclass(frozen=True)

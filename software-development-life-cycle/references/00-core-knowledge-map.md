@@ -1,6 +1,6 @@
 # SDLC Core Knowledge Map
 
-Use this index to ensure complete coverage of required topics.  
+Use this index to ensure complete coverage of required topics.
 The topic IDs map directly to the required 55-item list.
 
 ## Topic Coverage Matrix

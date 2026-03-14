@@ -81,12 +81,12 @@ Don't force multi-agent for:
 ### Multi-Agent Collaboration Workflow (Codex)
 
 When multi-agent is used, adhere to the following collaboration lifecycle to avoid "workaround" solutions and ensure high performance:
-1. **Brainstorming & Parallelism**: Spawn sub-agents for independent tasks or to parallelize research and ideation. 
+1. **Brainstorming & Parallelism**: Spawn sub-agents for independent tasks or to parallelize research and ideation.
 2. **Skill-First Staffing**: When a non-trivial task has a clear specialist surface or independent verification lane, do not keep every lane in the main agent by habit. Route to the owning skill and staff bounded sub-agents for the lanes that can safely progress in parallel.
 3. **Context Pruning (CRITICAL)**: Default `fork_context=false`. The upstream Codex `spawn_agent` contract defines `fork_context=true` as forking the current thread history into the new agent, so it copies parent context and can increase startup tokens, latency, and cost as the thread grows. Use `fork_context=true` only when the child truly needs the exact parent history. Otherwise, the main agent MUST summarize the current state and provide only the absolute necessary file paths, decisions, and context to the sub-agent. Before `send_input` or `spawn_agent`, prepare a robust handoff packet that covers the exact objective, constraints, relevant file paths, current findings, validation state, non-goals, and expected output.
 4. **Execution & Feedback**: Sub-agents do not just execute blindly; they should collaborate. For complex fixes, sub-agents should propose the idea ("is it okay to implement like this?") before committing extensive code.
 5. **Manager-Brokered Agent Feedback**: If agent-to-agent challenge or review is useful, keep the main agent in the loop and relay concise packets through it instead of replaying the full transcript to every child. Prefer explicit peer-feedback turns over unstructured cross-talk.
-6. **Synthesis & Handoff**: Upon completion, a sub-agent MUST return both a **concise summary** and the **detailed context/findings** back to the main agent. 
+6. **Synthesis & Handoff**: Upon completion, a sub-agent MUST return both a **concise summary** and the **detailed context/findings** back to the main agent.
 7. **Main Agent Verification**: The main orchestrating agent MUST formally verify the sub-agent's findings against the original objective. If the work is incomplete or flawed, the main agent will send feedback and instruct the sub-agent to fix it.
 8. **Wait Operations**: Wait on multiple agent IDs in one `wait` call instead of serial waits. Use a meaningful timeout for the task size rather than tight polling, do non-overlapping work before waiting again, and prefer one longer wait over many short waits. Never use `send_input(..., interrupt=true)` to hurry a required sub-agent; interruption is for explicit user cancellation or redirection only.
 9. **Required Completion**: If a spawned sub-agent is materially required for the task, the main agent MUST wait for it to reach a terminal state before finalizing. A sub-agent spawned for independent review, independent verification, or final-gap confirmation is required by default unless the user explicitly cancels or redirects that work. Do not silently ignore, abandon, or interrupt a required sub-agent because it is slow, because local evidence looks "good enough," or because the main agent is no longer blocked. If a `wait` call times out, increase the timeout, continue useful non-overlapping work, and wait again unless the user explicitly cancels or redirects the work.
@@ -196,7 +196,7 @@ The old generic `default`, `explorer`, `worker`, `architect`, and `awaiter` TOML
 - **Loop Back**: If the result remains too general, refine the search terms and restart the loop. You must rely on current external research plus internal logic to resolve technical ambiguities. Do not trust stale model memory for current facts, do not rely on prompting the user for technical facts you can verify yourself, and do not accept generic answers that still fail to solve the real problem or teach the missing knowledge precisely enough to proceed.
 
 **Knowledge Retention (Memory Schema & Pruning):**
-- **Do Not Bloat:** Never blindly append massive logs to memory files. 
+- **Do Not Bloat:** Never blindly append massive logs to memory files.
 - **Schema Enforcement:** When writing to `.codex_knowledge.md` or `.codex_lessons.md`, the agent MUST consolidate, deduplicate, and index the file. Use a strict Markdown schema:
   - `## [Topic/Error Name]`
   - `**Context:** Brief 1-sentence description.`

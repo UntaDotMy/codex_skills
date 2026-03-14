@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.dont_write_bytecode = True
 
 from memory_store import (
     archive_research_cache_entries,

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.dont_write_bytecode = True
 
 from memory_store import current_timestamp, ensure_memory_scope_layout, resolve_memory_scope
 

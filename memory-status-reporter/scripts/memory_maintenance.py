@@ -4,9 +4,12 @@ import argparse
 import json
 import math
 import re
+import sys
 from pathlib import Path
 
-from memory_store import current_timestamp, ensure_memory_scope_layout, resolve_memory_scope
+sys.dont_write_bytecode = True
+
+from memory_store import MemoryScope, current_timestamp, ensure_memory_scope_layout, resolve_memory_scope
 
 
 def approximate_token_count(text: str) -> int:
@@ -143,7 +146,7 @@ def rendered_file_token_count(header_lines: list[str], chunks: list[str]) -> int
     return approximate_token_count(render_markdown_chunks(header_lines, chunks))
 
 
-def trim_scope_files(scope, max_file_tokens: int, max_total_tokens: int) -> dict:
+def trim_scope_files(scope: MemoryScope, max_file_tokens: int, max_total_tokens: int) -> dict:
     l1_files = [
         ("workspace_summary", scope.workspace_summary_file),
         ("workstream_summary", scope.workstream_summary_file),

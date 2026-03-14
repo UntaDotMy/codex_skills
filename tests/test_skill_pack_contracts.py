@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -448,6 +449,9 @@ class SkillPackContractTests(unittest.TestCase):
             "home-agent and agent-profile TOMLs are now written explicitly as `gpt-5.4` with `medium` reasoning by default",
             validation_report_text,
         )
+        self.assertIn("Evidence Snapshot (Non-Score)", validation_report_text)
+        self.assertIn("does not publish a numeric readiness score", validation_report_text)
+        self.assertNotIn("Overall non-speed readiness score", validation_report_text)
         self.assertNotIn(
             "Repo-managed skill agents now inherit the workspace model and reasoning baseline",
             validation_report_text,
@@ -1935,6 +1939,111 @@ Notes:
             )
             self.assertEqual("null", lookup_after_unhealthy_process.stdout.strip())
 
+    def test_agent_registry_can_require_terminal_completion_for_required_lanes(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "agent_registry.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_path = Path(temporary_directory) / "workspace"
+            memory_base = Path(temporary_directory) / "memory-base"
+            workspace_path.mkdir()
+            memory_base.mkdir()
+
+            scope_arguments = [
+                "--memory-base",
+                str(memory_base),
+                "--workspace-root",
+                str(workspace_path),
+                "--workstream-key",
+                "feature-review",
+                "--agent-instance",
+                "manager-main",
+            ]
+
+            empty_check_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "check-required-completion",
+                    *scope_arguments,
+                    "--require-terminal",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(1, empty_check_process.returncode)
+            self.assertFalse(json.loads(empty_check_process.stdout)["closure_ready"])
+
+            register_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "register",
+                    *scope_arguments,
+                    "--agent-id",
+                    "reviewer-1",
+                    "--agent-role",
+                    "reviewer",
+                    "--status",
+                    "running",
+                    "--purpose",
+                    "final-audit",
+                    "--required",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, register_process.returncode, register_process.stdout + register_process.stderr)
+
+            running_check_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "check-required-completion",
+                    *scope_arguments,
+                    "--require-terminal",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(1, running_check_process.returncode)
+            self.assertEqual(1, json.loads(running_check_process.stdout)["non_terminal_required_count"])
+
+            completion_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "set-status",
+                    *scope_arguments,
+                    "--agent-id",
+                    "reviewer-1",
+                    "--status",
+                    "completed",
+                    "--note",
+                    "final audit finished",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, completion_process.returncode, completion_process.stdout + completion_process.stderr)
+
+            ready_check_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "check-required-completion",
+                    *scope_arguments,
+                    "--require-terminal",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, ready_check_process.returncode, ready_check_process.stdout + ready_check_process.stderr)
+            self.assertTrue(json.loads(ready_check_process.stdout)["closure_ready"])
+
     def test_agent_packets_script_builds_handoff_feedback_and_readiness_packets(self) -> None:
         script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "agent_packets.py"
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -2464,6 +2573,246 @@ Notes:
             self.assertEqual(0, done_payload["blocked_count"])
             self.assertTrue(done_payload["ledger_path"].endswith("completion-gate.json"))
 
+    def test_completion_gate_can_require_closure_ready_via_exit_code(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "completion_gate.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_path = Path(temporary_directory) / "workspace"
+            memory_base = Path(temporary_directory) / "memory-base"
+            workspace_path.mkdir()
+            memory_base.mkdir()
+
+            scope_arguments = [
+                "--memory-base",
+                str(memory_base),
+                "--workspace-root",
+                str(workspace_path),
+                "--workstream-key",
+                "feature-rollout",
+                "--agent-instance",
+                "reviewer-main",
+            ]
+
+            empty_check_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "check",
+                    *scope_arguments,
+                    "--require-closure-ready",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(1, empty_check_process.returncode)
+            self.assertFalse(json.loads(empty_check_process.stdout)["closure_ready"])
+
+            record_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "record-requirement",
+                    *scope_arguments,
+                    "--requirement-id",
+                    "requirement-1",
+                    "--text",
+                    "Ship the completion gate wiring.",
+                    "--status",
+                    "done",
+                    "--evidence",
+                    "Patched validate.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, record_process.returncode, record_process.stdout + record_process.stderr)
+
+            ready_check_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "check",
+                    *scope_arguments,
+                    "--require-closure-ready",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, ready_check_process.returncode, ready_check_process.stdout + ready_check_process.stderr)
+            self.assertTrue(json.loads(ready_check_process.stdout)["closure_ready"])
+
+    def test_agent_registry_lookup_prefers_running_lane_and_skips_unhealthy_by_default(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "agent_registry.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_path = Path(temporary_directory) / "workspace"
+            memory_base = Path(temporary_directory) / "memory-base"
+            workspace_path.mkdir()
+            memory_base.mkdir()
+
+            scope_arguments = [
+                "--memory-base",
+                str(memory_base),
+                "--workspace-root",
+                str(workspace_path),
+                "--workstream-key",
+                "feature-rollout",
+                "--agent-instance",
+                "reviewer-main",
+            ]
+
+            for agent_id, status in (("reviewer-running", "running"), ("reviewer-completed", "completed")):
+                register_process = subprocess.run(
+                    [
+                        sys.executable,
+                        str(script_path),
+                        "register",
+                        *scope_arguments,
+                        "--agent-id",
+                        agent_id,
+                        "--agent-role",
+                        "reviewer",
+                        "--status",
+                        status,
+                        "--purpose",
+                        "gap-audit",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(0, register_process.returncode, register_process.stdout + register_process.stderr)
+
+            first_lookup_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "lookup",
+                    *scope_arguments,
+                    "--agent-role",
+                    "reviewer",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, first_lookup_process.returncode, first_lookup_process.stdout + first_lookup_process.stderr)
+            self.assertEqual("reviewer-running", json.loads(first_lookup_process.stdout)["agent_id"])
+
+            mark_unhealthy_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "mark-unhealthy",
+                    *scope_arguments,
+                    "--agent-id",
+                    "reviewer-running",
+                    "--reason",
+                    "stale ACK",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, mark_unhealthy_process.returncode, mark_unhealthy_process.stdout + mark_unhealthy_process.stderr)
+
+            second_lookup_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "lookup",
+                    *scope_arguments,
+                    "--agent-role",
+                    "reviewer",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, second_lookup_process.returncode, second_lookup_process.stdout + second_lookup_process.stderr)
+            self.assertEqual("reviewer-completed", json.loads(second_lookup_process.stdout)["agent_id"])
+
+    def test_agent_packets_build_readiness_and_handoff_packets(self) -> None:
+        script_path = REPOSITORY_ROOT / "memory-status-reporter" / "scripts" / "agent_packets.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace_path = Path(temporary_directory) / "workspace"
+            memory_base = Path(temporary_directory) / "memory-base"
+            workspace_path.mkdir()
+            memory_base.mkdir()
+
+            scope_arguments = [
+                "--memory-base",
+                str(memory_base),
+                "--workspace-root",
+                str(workspace_path),
+                "--workstream-key",
+                "feature-rollout",
+                "--agent-instance",
+                "manager-main",
+            ]
+
+            readiness_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "build-readiness-check",
+                    *scope_arguments,
+                    "--target-agent-role",
+                    "reviewer",
+                    "--target-agent-id",
+                    "reviewer-123",
+                    "--question",
+                    "Reply with a fresh ACK before reuse.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, readiness_process.returncode, readiness_process.stdout + readiness_process.stderr)
+            readiness_payload = json.loads(readiness_process.stdout)
+            self.assertEqual("readiness-check", readiness_payload["packet_kind"])
+            self.assertEqual("reviewer", readiness_payload["target_agent"]["role"])
+            self.assertEqual("reviewer-123", readiness_payload["target_agent"]["agent_id"])
+            self.assertIn("ACK", readiness_payload["question"])
+            self.assertTrue(Path(readiness_payload["packet_file"]).exists())
+
+            handoff_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "build-handoff",
+                    *scope_arguments,
+                    "--objective",
+                    "Validate the routing patch.",
+                    "--constraint",
+                    "Read-only",
+                    "--relevant-file",
+                    "sync-skills.sh",
+                    "--finding",
+                    "Reviewer gate step was added.",
+                    "--validation",
+                    "validate pending",
+                    "--non-goal",
+                    "Do not edit files",
+                    "--expected-output",
+                    "Return concrete findings only.",
+                    "--target-agent-role",
+                    "reviewer",
+                    "--target-agent-id",
+                    "reviewer-123",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, handoff_process.returncode, handoff_process.stdout + handoff_process.stderr)
+            handoff_payload = json.loads(handoff_process.stdout)
+            self.assertEqual("handoff", handoff_payload["packet_kind"])
+            self.assertEqual(["sync-skills.sh"], handoff_payload["relevant_files"])
+            self.assertEqual(["Return concrete findings only."], handoff_payload["expected_output"])
+            self.assertTrue(Path(handoff_payload["packet_file"]).exists())
+
     def test_install_uses_repo_managed_refresh_when_pack_is_installed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
@@ -2512,7 +2861,11 @@ Notes:
             0,
             completed_process.stdout + completed_process.stderr,
         )
-        self.assertNotIn("[run] contract tests", strip_ansi(completed_process.stdout + completed_process.stderr))
+        normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+        self.assertIn("[run] reviewer quality gates", normalized_output)
+        self.assertIn("[run] completion gate smoke", normalized_output)
+        self.assertIn("[run] required agent completion smoke", normalized_output)
+        self.assertNotIn("[run] contract tests", normalized_output)
 
     def test_validate_all_runs_contract_tests_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -2522,6 +2875,9 @@ Notes:
                 f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
                 'validate_codex_repo_docs() { return 0; }; '
                 'collect_failed_skill_names_parallel() { return 0; }; '
+                'run_reviewer_quality_gates() { return 0; }; '
+                'run_validate_completion_gate_smoke() { return 0; }; '
+                'run_validate_required_agent_completion_smoke() { return 0; }; '
                 'run_repo_contract_tests() { printf "contract-tests-ran\\n" >&2; return 1; }; '
                 'validate_all'
             )
@@ -2531,6 +2887,197 @@ Notes:
             self.assertIn("[run] contract tests", normalized_output)
             self.assertIn("[FAIL] contract tests", normalized_output)
             self.assertIn("contract-tests-ran", normalized_output)
+
+    def test_reviewer_quality_gates_run_import_linter_from_repo_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            fake_repository_path = temporary_path / "repo"
+            fake_repository_path.mkdir()
+            (fake_repository_path / ".importlinter").write_text("[importlinter]\nroot_package = demo\n", encoding="utf-8")
+            (fake_repository_path / "tools").mkdir()
+            shutil.copy2(REPOSITORY_ROOT / "tools" / "repo_quality_gate.py", fake_repository_path / "tools" / "repo_quality_gate.py")
+            fake_bin_path = temporary_path / "bin"
+            fake_bin_path.mkdir()
+            observed_working_directory_path = temporary_path / "observed-working-directory.txt"
+            fake_lint_imports_path = fake_bin_path / "lint-imports"
+            fake_lint_imports_path.write_text(
+                f"#!/bin/sh\npwd > {shlex.quote(str(observed_working_directory_path))}\nexit 0\n",
+                encoding="utf-8",
+            )
+            fake_lint_imports_path.chmod(0o755)
+
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{fake_repository_path}"; '
+                f'PATH="{fake_bin_path}:$PATH"; '
+                f'cd "{temporary_path}"; '
+                'run_reviewer_quality_gates'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("Circular imports: pass (repo-scoped cycle gate)", normalized_output)
+            self.assertIn("Import safety: pass", normalized_output)
+            self.assertEqual(str(fake_repository_path), observed_working_directory_path.read_text(encoding="utf-8").strip())
+
+    def test_reviewer_quality_gates_use_repo_scoped_fallbacks_for_current_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                'run_reviewer_quality_gates'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("Black: pass (repo-scoped formatter gate)", normalized_output)
+            self.assertIn("Ruff: pass (repo-scoped lint gate)", normalized_output)
+            self.assertIn("MyPy: pass (repo-scoped type gate)", normalized_output)
+            self.assertIn("Circular imports: pass (repo-scoped cycle gate)", normalized_output)
+            self.assertIn("Import safety: pass (repo-scoped boundary gate)", normalized_output)
+            self.assertIn("Prettier: pass (repo-scoped asset gate)", normalized_output)
+
+    def test_reviewer_quality_gates_report_circular_imports_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            fake_repository_path = temporary_path / "repo"
+            fake_repository_path.mkdir()
+            (fake_repository_path / ".importlinter").write_text(
+                "[importlinter]\nroot_package = demo\n\n[importlinter:contract:cycles]\ntype = acyclic_siblings\n",
+                encoding="utf-8",
+            )
+            (fake_repository_path / "tools").mkdir()
+            shutil.copy2(REPOSITORY_ROOT / "tools" / "repo_quality_gate.py", fake_repository_path / "tools" / "repo_quality_gate.py")
+            fake_bin_path = temporary_path / "bin"
+            fake_bin_path.mkdir()
+            fake_lint_imports_path = fake_bin_path / "lint-imports"
+            fake_lint_imports_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_lint_imports_path.chmod(0o755)
+
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{fake_repository_path}"; '
+                f'PATH="{fake_bin_path}:$PATH"; '
+                'run_reviewer_quality_gates'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("Circular imports: pass", normalized_output)
+            self.assertIn("Import safety: pass", normalized_output)
+
+    def test_validate_all_runs_reviewer_quality_gates_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                'validate_codex_repo_docs() { return 0; }; '
+                'collect_failed_skill_names_parallel() { return 0; }; '
+                'run_reviewer_quality_gates() { printf "reviewer-gates-ran\\n"; return 1; }; '
+                'run_validate_completion_gate_smoke() { return 0; }; '
+                'run_validate_required_agent_completion_smoke() { return 0; }; '
+                'run_repo_contract_tests() { return 0; }; '
+                'validate_all'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(1, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("[run] reviewer quality gates", normalized_output)
+            self.assertIn("[FAIL] reviewer quality gates", normalized_output)
+            self.assertIn("reviewer-gates-ran", normalized_output)
+
+    def test_validate_all_runs_completion_gate_smoke_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                'validate_codex_repo_docs() { return 0; }; '
+                'collect_failed_skill_names_parallel() { return 0; }; '
+                'run_reviewer_quality_gates() { return 0; }; '
+                'run_validate_completion_gate_smoke() { printf "completion-gate-smoke-ran\\n"; return 1; }; '
+                'run_validate_required_agent_completion_smoke() { return 0; }; '
+                'run_repo_contract_tests() { return 0; }; '
+                'validate_all'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(1, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("[run] completion gate smoke", normalized_output)
+            self.assertIn("[FAIL] completion gate smoke", normalized_output)
+            self.assertIn("completion-gate-smoke-ran", normalized_output)
+
+    def test_validate_all_runs_required_agent_completion_smoke_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sourced_script_path = write_sync_script_without_main(Path(temporary_directory))
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                'validate_codex_repo_docs() { return 0; }; '
+                'collect_failed_skill_names_parallel() { return 0; }; '
+                'run_reviewer_quality_gates() { return 0; }; '
+                'run_validate_completion_gate_smoke() { return 0; }; '
+                'run_validate_required_agent_completion_smoke() { printf "required-agent-smoke-ran\\n"; return 1; }; '
+                'run_repo_contract_tests() { return 0; }; '
+                'validate_all'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(1, completed_process.returncode, completed_process.stdout + completed_process.stderr)
+            normalized_output = strip_ansi(completed_process.stdout + completed_process.stderr)
+            self.assertIn("[run] required agent completion smoke", normalized_output)
+            self.assertIn("[FAIL] required agent completion smoke", normalized_output)
+            self.assertIn("required-agent-smoke-ran", normalized_output)
+
+    def test_repo_quality_gate_types_rejects_missing_annotations(self) -> None:
+        script_path = REPOSITORY_ROOT / "tools" / "repo_quality_gate.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            (temporary_path / "example.py").write_text(
+                "def build_value(name):\n    return name.upper()\n",
+                encoding="utf-8",
+            )
+            completed_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "types",
+                    "--root",
+                    str(temporary_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(1, completed_process.returncode)
+            self.assertIn("missing argument annotations", completed_process.stderr)
+            self.assertIn("missing return annotation", completed_process.stderr)
+
+    def test_repo_quality_gate_import_safety_rejects_cross_scope_imports(self) -> None:
+        script_path = REPOSITORY_ROOT / "tools" / "repo_quality_gate.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            (temporary_path / "alpha").mkdir()
+            (temporary_path / "beta").mkdir()
+            (temporary_path / "alpha" / "main.py").write_text("import beta.helper\n", encoding="utf-8")
+            (temporary_path / "beta" / "helper.py").write_text("VALUE = 1\n", encoding="utf-8")
+            completed_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(script_path),
+                    "import-safety",
+                    "--root",
+                    str(temporary_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(1, completed_process.returncode)
+            self.assertIn("cross-scope import", completed_process.stderr)
 
     def test_fast_install_validation_skips_contract_tests_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -3119,6 +3666,110 @@ Notes:
             )
             self.assertEqual("up to date", completed_process.stdout.strip())
 
+    def test_skill_pack_status_stays_up_to_date_when_only_local_repo_changes_are_present(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agent-profiles" "$(skill_manager_state_directory)"; '
+                'write_install_metadata; '
+                'write_managed_agent_profile_inventory_from_repo; '
+                'collect_changed_skills_parallel() { return 0; }; '
+                'collect_changed_agent_profile_names() { return 0; }; '
+                'managed_config_wiring_needs_update() { return 1; }; '
+                'git_repository_available() { return 0; }; '
+                'git_worktree_is_clean() { return 1; }; '
+                'root_guidance_files_need_update() { return 1; }; '
+                'list_removed_repo_managed_skill_names() { return 0; }; '
+                'list_removed_repo_managed_agent_profile_names() { return 0; }; '
+                'status_output="$(summarize_skill_pack_update_status)"; '
+                'checksum_output="$(show_checksum_status)"; '
+                'printf "%s\\n---\\n%s" "$status_output" "$checksum_output"; '
+                'test "$status_output" = "up to date"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            rendered_output = completed_process.stdout.strip()
+            self.assertIn("up to date", rendered_output)
+            self.assertIn("skill checksum status: all installed skills match source", rendered_output)
+
+    def test_skill_pack_status_reports_skill_drift_when_local_repo_changes_touch_managed_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'SKILL_PACK_STATUS_DETAILS_READY="true"; '
+                'SKILL_PACK_STATUS_PACK_INSTALLED="true"; '
+                'SKILL_PACK_STATUS_ROOT_GUIDANCE_CHANGED="false"; '
+                'SKILL_PACK_STATUS_CONFIG_WIRING_REFRESH="false"; '
+                'SKILL_PACK_STATUS_SKILL_SCAN_SKIPPED="false"; '
+                'SKILL_PACK_STATUS_SKILL_REFRESH_REASON=""; '
+                'SKILL_PACK_STATUS_CHANGED_SKILLS=(reviewer); '
+                'SKILL_PACK_STATUS_REMOVED_SKILLS=(); '
+                'SKILL_PACK_STATUS_CHANGED_AGENT_PROFILES=(); '
+                'SKILL_PACK_STATUS_REMOVED_AGENT_PROFILES=(); '
+                'status_output="$(summarize_skill_pack_update_status)"; '
+                'checksum_output="$(show_checksum_status)"; '
+                'printf "%s\\n---\\n%s" "$status_output" "$checksum_output"; '
+                'test "$status_output" = "update available (1 skill change(s))"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            rendered_output = completed_process.stdout.strip()
+            self.assertIn("update available (1 skill change(s))", rendered_output)
+            self.assertIn("skill checksum status: drift in reviewer", rendered_output)
+
+    def test_skill_pack_status_does_not_claim_up_to_date_when_changed_skill_scan_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'CODEX_SOURCE="{REPOSITORY_ROOT}"; '
+                f'CODEX_TARGET="{temporary_path / ".codex"}"; '
+                'mkdir -p "$CODEX_TARGET/agent-profiles" "$(skill_manager_state_directory)"; '
+                'write_install_metadata; '
+                'write_managed_agent_profile_inventory_from_repo; '
+                'collect_changed_skills_parallel() { return 1; }; '
+                'collect_changed_agent_profile_names() { return 0; }; '
+                'managed_config_wiring_needs_update() { return 1; }; '
+                'git_repository_available() { return 0; }; '
+                'git_worktree_is_clean() { return 1; }; '
+                'root_guidance_files_need_update() { return 1; }; '
+                'list_removed_repo_managed_skill_names() { return 0; }; '
+                'list_removed_repo_managed_agent_profile_names() { return 0; }; '
+                'status_output="$(summarize_skill_pack_update_status)"; '
+                'checksum_output="$(show_checksum_status)"; '
+                'printf "%s\\n---\\n%s" "$status_output" "$checksum_output"; '
+                'test "$status_output" = "update available (local repo changes present; managed-skill diff failed)"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            rendered_output = completed_process.stdout.strip()
+            self.assertIn("update available (local repo changes present; managed-skill diff failed)", rendered_output)
+            self.assertIn(
+                "skill checksum status: quick status detected local repo changes present; managed-skill diff failed; run install or verify for a deep content refresh check",
+                rendered_output,
+            )
+
     def test_install_seed_populates_memory_writer_fast_lane_and_prunes_repo_managed_non_memory_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
@@ -3515,6 +4166,42 @@ Notes:
                 completed_process.returncode,
                 completed_process.stdout + completed_process.stderr,
             )
+
+    def test_memory_status_scripts_do_not_emit_pycache_when_executed_from_installed_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            installed_scripts_path = temporary_path / ".codex" / "skills" / "memory-status-reporter" / "scripts"
+            workspace_path = temporary_path / "workspace"
+            memory_base = temporary_path / "memory-base"
+            shutil.copytree(REPOSITORY_ROOT / "memory-status-reporter" / "scripts", installed_scripts_path)
+            workspace_path.mkdir()
+            memory_base.mkdir()
+
+            completed_process = subprocess.run(
+                [
+                    sys.executable,
+                    str(installed_scripts_path / "completion_gate.py"),
+                    "check",
+                    "--memory-base",
+                    str(memory_base),
+                    "--workspace-root",
+                    str(workspace_path),
+                    "--workstream-key",
+                    "feature-rollout",
+                    "--agent-instance",
+                    "reviewer-main",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                0,
+                completed_process.returncode,
+                completed_process.stdout + completed_process.stderr,
+            )
+            self.assertEqual([], list(installed_scripts_path.rglob("__pycache__")))
+            self.assertEqual([], list(installed_scripts_path.rglob("*.pyc")))
 
     def test_sync_validate_smoke_passes_from_absolute_script_path(self) -> None:
         if os.environ.get("CODEX_SKIP_VALIDATE_SMOKE") == "1":
