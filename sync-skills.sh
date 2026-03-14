@@ -349,7 +349,7 @@ MEMORY_STATUS_REQUIRED_CONFIG_LINES=(
     "- If a non-trivial task clearly belongs to one specialist surface, do not stay solo by default; route to that owning skill or staff a bounded specialist lane instead of keeping all work in the main lane."
     "- For multi-part requests, preserve one top-level plan item per explicit user task and give each top-level item its own breakdown, validation target, and completion check before implementation."
     "- Strengthen vague prompts from repository, runtime, and memory evidence before acting; if business logic remains ambiguous, clarify instead of drifting."
-    "- When business intent remains ambiguous after repository and runtime inspection, use request_user_input to confirm direction instead of guessing."
+    "- When business intent remains ambiguous after repository and runtime inspection, ask the user directly in the normal turn, or use request_user_input when that control exists in the active runtime, instead of guessing."
     "- For code work, prefer test-first when practical by starting with a failing test or executable acceptance check before implementation."
     "- Keep researching during implementation whenever APIs, tools, edge cases, or best practices are uncertain; do not trust stale memory alone."
     "- When validation, testing, or review reveals another in-scope bug or quality gap, keep iterating in the same turn and fix the next issue before handing off; only stop early when blocked by ambiguity, external access limits, or a clearly labeled out-of-scope item."
@@ -2794,7 +2794,7 @@ validate_codex_agent_config() {
     fi
 
     default_prompt_character_count="$(count_codex_openai_value_metric "$config_file" "default_prompt" "characters")"
-    if [[ "$default_prompt_character_count" -gt 1601 ]]; then
+    if [[ "$default_prompt_character_count" -gt 1800 ]]; then
         print_error "Codex agent prompt is too long and likely duplicates repo policy: $skill_name ($default_prompt_character_count characters)"
         return 1
     fi

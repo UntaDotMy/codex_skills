@@ -540,7 +540,7 @@ Use features when they provide clear value, not by default.
 - Write minimal, focused code
 - Test critical functionality
 - **Perform Deep Research** when encountering technical blockers, bug fixes, or how-to implementations. Rely on the 3-round research loop and internal analysis rather than interrupting the user for technical help.
-- **Use the `request_user_input` tool for Clarification**: If the business requirements, user stories, or product logic are ambiguous, you MUST use `request_user_input` to clarify. It is critical that the agent and the user are on the same page to prevent "drifting" and building the wrong product. There is NO LIMIT to how many times you can use `request_user_input` for requirement clarification. Do not guess the user's intent, and do not start implementation while the core product direction is still unclear.
+- **Clarify with runtime-safe controls**: If the business requirements, user stories, or product logic are ambiguous, ask the user directly in the normal turn, or use `request_user_input` when that control exists in the active runtime. It is critical that the agent and the user stay aligned to prevent "drifting" and building the wrong product. Do not guess the user's intent, and do not start implementation while the core product direction is still unclear.
 - Use appropriate agent profiles for task type
 
 ### Don't:

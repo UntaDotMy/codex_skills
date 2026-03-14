@@ -276,7 +276,7 @@ class SkillPackContractTests(unittest.TestCase):
             if prompt_match is None:
                 over_limit.append(skill_directory.name)
                 continue
-            if prompt_word_count(yaml_text) > 260 or len(prompt_match.group(1)) > 1600:
+            if prompt_word_count(yaml_text) > 260 or len(prompt_match.group(1)) > 1800:
                 over_limit.append(skill_directory.name)
 
         self.assertEqual([], over_limit, f"overlong prompts: {over_limit}")
@@ -295,6 +295,7 @@ class SkillPackContractTests(unittest.TestCase):
         missing_honesty_guidance: list[str] = []
         missing_parallel_work_guidance: list[str] = []
         missing_js_repl_only_guidance: list[str] = []
+        missing_repeat_mistake_guidance: list[str] = []
 
         for skill_directory in SKILL_DIRECTORIES:
             yaml_text = read_text(skill_directory / "agents" / "openai.yaml")
@@ -308,7 +309,7 @@ class SkillPackContractTests(unittest.TestCase):
                 missing_scope_guidance.append(skill_directory.name)
             if "interrupt=true" not in yaml_text:
                 missing_interrupt_guidance.append(skill_directory.name)
-            if "request_user_input" not in yaml_text:
+            if "ask directly or use request_user_input when available" not in yaml_text:
                 missing_clarification_guidance.append(skill_directory.name)
             if "do not stay solo by default" not in yaml_text:
                 missing_staffing_guidance.append(skill_directory.name)
@@ -324,6 +325,8 @@ class SkillPackContractTests(unittest.TestCase):
                 missing_parallel_work_guidance.append(skill_directory.name)
             if "Route tool work through js_repl with codex.tool(...)." not in yaml_text:
                 missing_js_repl_only_guidance.append(skill_directory.name)
+            if "record the reusable mistake" not in yaml_text:
+                missing_repeat_mistake_guidance.append(skill_directory.name)
 
         self.assertEqual([], missing_cache_guidance, f"missing cache guidance: {missing_cache_guidance}")
         self.assertEqual([], missing_autonomy_guidance, f"missing autonomy guidance: {missing_autonomy_guidance}")
@@ -338,6 +341,21 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertEqual([], missing_honesty_guidance, f"missing honesty guidance: {missing_honesty_guidance}")
         self.assertEqual([], missing_parallel_work_guidance, f"missing parallel work guidance: {missing_parallel_work_guidance}")
         self.assertEqual([], missing_js_repl_only_guidance, f"missing js_repl guidance: {missing_js_repl_only_guidance}")
+        self.assertEqual([], missing_repeat_mistake_guidance, f"missing repeat-mistake guidance: {missing_repeat_mistake_guidance}")
+
+    def test_every_skill_keeps_repeat_mistake_prevention_in_completion_discipline(self) -> None:
+        missing_repeat_mistake_guidance: list[str] = []
+
+        for skill_directory in SKILL_DIRECTORIES:
+            skill_text = read_text(skill_directory / "SKILL.md")
+            if "same failing tool call" not in skill_text and "record the reusable mistake pattern" not in skill_text:
+                missing_repeat_mistake_guidance.append(skill_directory.name)
+
+        self.assertEqual(
+            [],
+            missing_repeat_mistake_guidance,
+            f"missing repeat-mistake skill guidance: {missing_repeat_mistake_guidance}",
+        )
 
         reviewer_agent_text = read_text(REPOSITORY_ROOT / "reviewer" / "agents" / "openai.yaml")
         software_agent_text = read_text(

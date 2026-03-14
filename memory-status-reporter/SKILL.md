@@ -14,6 +14,7 @@ Turn Codex memory artifacts into a human-readable status report that feels like 
 ## Research Reuse Defaults
 
 - Check indexed memory and any recorded research-cache entry before starting a fresh live research loop.
+- Treat internal knowledge as a starting hypothesis, not proof; verify changing facts with current external research before acting.
 - Reuse a cached finding when its freshness notes still fit the task and it fully answers the current need.
 - Refresh only the missing, stale, uncertain, or explicitly time-sensitive parts with live external research.
 - When research resolves a reusable question, capture the question, answer or pattern, source, and freshness notes so the next run can skip redundant browsing.
