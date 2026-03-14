@@ -2787,13 +2787,13 @@ validate_codex_agent_config() {
         return 1
     fi
 
-    default_prompt_word_count="$(extract_codex_openai_value "$config_file" "default_prompt" | wc -w | awk '{print $1}')"
+    default_prompt_word_count="$(count_codex_openai_value_metric "$config_file" "default_prompt" "words")"
     if [[ "$default_prompt_word_count" -gt 260 ]]; then
         print_error "Codex agent prompt is too long and likely duplicates repo policy: $skill_name ($default_prompt_word_count words)"
         return 1
     fi
 
-    default_prompt_character_count="$(extract_codex_openai_value "$config_file" "default_prompt" | wc -c | awk '{print $1}')"
+    default_prompt_character_count="$(count_codex_openai_value_metric "$config_file" "default_prompt" "characters")"
     if [[ "$default_prompt_character_count" -gt 1601 ]]; then
         print_error "Codex agent prompt is too long and likely duplicates repo policy: $skill_name ($default_prompt_character_count characters)"
         return 1
@@ -3243,6 +3243,47 @@ if field_match is None:
     raise SystemExit(f"Missing {field_name} in {openai_yaml_path}")
 
 print(json.loads(field_match.group(1)))
+PY
+}
+
+count_codex_openai_value_metric() {
+    local openai_yaml_path=$1
+    local field_name=$2
+    local metric_name=$3
+
+    run_python - "$openai_yaml_path" "$field_name" "$metric_name" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+openai_yaml_path = Path(sys.argv[1])
+field_name = sys.argv[2]
+metric_name = sys.argv[3]
+openai_yaml_text = openai_yaml_path.read_text(encoding="utf-8")
+
+field_patterns = {
+    "model": r'^model:\s*(".*")\s*$',
+    "reasoning_effort": r'^reasoning_effort:\s*(".*")\s*$',
+    "short_description": r'^\s+short_description:\s*(".*")\s*$',
+    "default_prompt": r'^\s+default_prompt:\s*(".*")\s*$',
+}
+
+field_pattern = field_patterns.get(field_name)
+if field_pattern is None:
+    raise SystemExit(f"Unsupported field: {field_name}")
+
+field_match = re.search(field_pattern, openai_yaml_text, flags=re.MULTILINE)
+if field_match is None:
+    raise SystemExit(f"Missing {field_name} in {openai_yaml_path}")
+
+field_value = json.loads(field_match.group(1))
+if metric_name == "words":
+    print(len(field_value.split()))
+elif metric_name == "characters":
+    print(len(field_value))
+else:
+    raise SystemExit(f"Unsupported metric: {metric_name}")
 PY
 }
 

@@ -508,7 +508,7 @@ class SkillPackContractTests(unittest.TestCase):
         self.assertIn("prettier --check", reviewer_skill_text)
         self.assertIn("Quality Gates", reviewer_skill_text)
         self.assertIn("Circular imports: pass | fail | skipped | blocked", reviewer_skill_text)
-        self.assertIn('"7. Language-Specific Quality Gates \\\\(CRITICAL\\\\)"', validator_script_text)
+        self.assertIn('"7. Language-Specific Quality Gates (CRITICAL)"', validator_script_text)
         self.assertIn("Never hardcode runtime values", software_skill_text)
         self.assertIn("Hold delivery until the current requirement set is proven done or explicitly blocked", software_skill_text)
         self.assertIn("REJECT hardcoded runtime values", reviewer_skill_text)
@@ -2810,6 +2810,17 @@ Notes:
         with mock.patch("tests.parallel_contract_test_runner.os.process_cpu_count", new=None, create=True):
             with mock.patch("tests.parallel_contract_test_runner.os.cpu_count", return_value=5):
                 self.assertEqual(5, resolve_parallel_worker_limit(target_count=99))
+
+    def test_validate_codex_agent_config_counts_default_prompt_characters_without_python_newline_inflation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            sourced_script_path = write_sync_script_without_main(temporary_path)
+            command = (
+                f'source "{sourced_script_path}"; '
+                f'validate_codex_agent_config "reviewer" "reviewer" "{REPOSITORY_ROOT / "reviewer" / "agents" / "openai.yaml"}"'
+            )
+            completed_process = run_bash(command)
+            self.assertEqual(0, completed_process.returncode, completed_process.stdout + completed_process.stderr)
 
     def test_repo_validation_ignores_live_reasoning_override_for_root_skill_configs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
